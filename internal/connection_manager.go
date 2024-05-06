@@ -20,45 +20,50 @@ const (
 	defaultApplication = "waves"
 )
 
-var discardedMessages = map[proto.PeerMessageID]bool{
-	proto.ContentIDGetPeers:          false,
-	proto.ContentIDPeers:             false,
-	proto.ContentIDGetSignatures:     true,
-	proto.ContentIDSignatures:        false,
-	proto.ContentIDGetBlock:          true,
-	proto.ContentIDBlock:             false,
-	proto.ContentIDScore:             false,
-	proto.ContentIDTransaction:       true,
-	proto.ContentIDInvMicroblock:     true,
-	proto.ContentIDCheckpoint:        true,
-	proto.ContentIDMicroblockRequest: true,
-	proto.ContentIDMicroblock:        true,
-	proto.ContentIDPBBlock:           false,
-	proto.ContentIDPBMicroBlock:      true,
-	proto.ContentIDPBTransaction:     true,
-	proto.ContentIDGetBlockIds:       true,
-	proto.ContentIDBlockIds:          false,
-}
-
 type ConnectionManager struct {
-	network  string
-	name     string
-	nonce    uint32
-	declared proto.TCPAddr
-	parent   peer.Parent
-	vp       peers.VersionProvider
+	network   string
+	name      string
+	nonce     uint32
+	declared  proto.TCPAddr
+	parent    peer.Parent
+	vp        peers.VersionProvider
+	discarded map[proto.PeerMessageID]bool
 }
 
 func NewConnectionManager(
 	scheme byte, name string, nonce uint32, declared proto.TCPAddr, vp peers.VersionProvider, parent peer.Parent,
 ) *ConnectionManager {
+	discardedMessages := map[proto.PeerMessageID]bool{
+		proto.ContentIDGetPeers:                  false,
+		proto.ContentIDPeers:                     false,
+		proto.ContentIDGetSignatures:             true,
+		proto.ContentIDSignatures:                false,
+		proto.ContentIDGetBlock:                  true,
+		proto.ContentIDBlock:                     false,
+		proto.ContentIDScore:                     false,
+		proto.ContentIDTransaction:               true,
+		proto.ContentIDInvMicroblock:             true,
+		proto.ContentIDCheckpoint:                true,
+		proto.ContentIDMicroblockRequest:         true,
+		proto.ContentIDMicroblock:                true,
+		proto.ContentIDPBBlock:                   false,
+		proto.ContentIDPBMicroBlock:              true,
+		proto.ContentIDPBTransaction:             true,
+		proto.ContentIDGetBlockIDs:               true,
+		proto.ContentIDBlockIDs:                  false,
+		proto.ContentIDGetBlockSnapshot:          false,
+		proto.ContentIDMicroBlockSnapshot:        false,
+		proto.ContentIDBlockSnapshot:             false,
+		proto.ContentIDMicroBlockSnapshotRequest: false,
+	}
 	return &ConnectionManager{
-		network:  fmt.Sprintf("%s%c", defaultApplication, scheme),
-		name:     name,
-		nonce:    nonce,
-		declared: declared,
-		parent:   parent,
-		vp:       vp,
+		network:   fmt.Sprintf("%s%c", defaultApplication, scheme),
+		name:      name,
+		nonce:     nonce,
+		declared:  declared,
+		parent:    parent,
+		vp:        vp,
+		discarded: discardedMessages,
 	}
 }
 
@@ -110,7 +115,7 @@ func (h *ConnectionManager) Connect(ctx context.Context, addr proto.TCPAddr) err
 }
 
 func (h *ConnectionManager) skipFunc(header proto.Header) bool {
-	if r, ok := discardedMessages[header.ContentID]; ok {
+	if r, ok := h.discarded[header.ContentID]; ok {
 		return r
 	}
 	return false

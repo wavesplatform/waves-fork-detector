@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"unicode"
 
 	"go.uber.org/zap"
 
@@ -14,7 +15,7 @@ import (
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
 
 	"github.com/alexeykiselev/waves-fork-detector/internal"
-	"github.com/alexeykiselev/waves-fork-detector/internal/blocks"
+	"github.com/alexeykiselev/waves-fork-detector/internal/chains"
 	"github.com/alexeykiselev/waves-fork-detector/internal/peers"
 )
 
@@ -24,7 +25,8 @@ var (
 
 func main() {
 	if err := run(); err != nil {
-		if _, errErr := fmt.Fprintf(os.Stderr, "Error: %v\n", err); errErr != nil {
+		zap.S().Error(capitalize(err.Error()))
+		if _, errErr := fmt.Fprintf(os.Stderr, "%s\n", capitalize(err.Error())); errErr != nil {
 			return
 		}
 		os.Exit(1)
@@ -53,8 +55,7 @@ func run() error {
 
 	reg, err := peers.NewRegistry(p.scheme, p.declaredAddress, p.versions, p.dbPath)
 	if err != nil {
-		zap.S().Errorf("Failed to create peers registry: %v", err)
-		return err
+		return fmt.Errorf("failed to create peers registry: %w", err)
 	}
 	defer func(reg *peers.Registry) {
 		if rcErr := reg.Close(); rcErr != nil {
@@ -67,21 +68,19 @@ func run() error {
 		zap.S().Infof("%d seed peers added to storage", n)
 	}
 
-	drawer, err := blocks.NewDrawer(p.dbPath, p.scheme, p.genesis)
+	linkage, err := chains.NewLinkage(p.dbPath, p.scheme, p.genesis)
 	if err != nil {
-		zap.S().Errorf("Failed to create blocks drawer: %v", err)
 		return err
 	}
-	defer drawer.Close()
+	defer linkage.Close()
 
-	api, err := internal.NewAPI(reg, drawer, p.apiBind)
+	api, err := internal.NewAPI(reg, linkage, p.apiBind)
 	if err != nil {
-		zap.S().Errorf("Failed to create API server: %v", err)
-		return err
+		return fmt.Errorf("failed to create API server: %w", err)
 	}
 	api.Run(ctx)
 
-	parent := peer.NewParent()
+	parent := peer.NewParent(false)
 	connManger := internal.NewConnectionManager(p.scheme, p.name, p.nonce, p.declaredAddress, reg, parent)
 
 	listener := internal.NewListener(p.netBind, p.declaredAddress, connManger)
@@ -90,12 +89,14 @@ func run() error {
 	respawn := internal.NewRespawn(reg, connManger)
 	respawn.Run(ctx)
 
-	distributor, err := internal.NewDistributor(p.scheme, drawer, reg, parent)
+	distributor, err := internal.NewDistributor(p.scheme, linkage, reg, parent)
 	if err != nil {
-		zap.S().Errorf("Failed to instantiate distributor: %v", err)
-		return err
+		return fmt.Errorf("failed to instantiate distributor: %w", err)
 	}
 	distributor.Run(ctx)
+
+	loader := internal.NewLoader(reg, linkage, distributor.IDsCh(), distributor.BlockCh())
+	loader.Run(ctx)
 
 	<-ctx.Done()
 	zap.S().Info("User termination in progress...")
@@ -103,9 +104,16 @@ func run() error {
 	api.Shutdown()
 	listener.Shutdown()
 	respawn.Shutdown()
+	loader.Shutdown()
 	distributor.Shutdown()
 
 	zap.S().Info("Terminated")
 
 	return nil
+}
+
+func capitalize(str string) string {
+	runes := []rune(str)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }

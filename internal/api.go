@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/alexeykiselev/waves-fork-detector/internal/blocks"
+	"github.com/alexeykiselev/waves-fork-detector/internal/chains"
 	"github.com/alexeykiselev/waves-fork-detector/internal/peers"
 )
 
@@ -62,7 +62,7 @@ type API struct {
 	ctx      context.Context
 	wait     func() error
 	registry *peers.Registry
-	drawer   *blocks.Drawer
+	linkage  *chains.Linkage
 	srv      *http.Server
 }
 
@@ -74,11 +74,11 @@ type PublicAddressInfo struct {
 	NextAttemptTime time.Time `json:"next_attempt_time"`
 }
 
-func NewAPI(registry *peers.Registry, drawer *blocks.Drawer, bind string) (*API, error) {
+func NewAPI(registry *peers.Registry, linkage *chains.Linkage, bind string) (*API, error) {
 	if bind == "" {
 		return nil, errors.New("empty address to bin")
 	}
-	a := API{registry: registry, drawer: drawer}
+	a := API{registry: registry, linkage: linkage}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -132,7 +132,7 @@ func (a *API) routes() chi.Router {
 
 func (a *API) status(w http.ResponseWriter, _ *http.Request) {
 	goroutines := runtime.NumGoroutine()
-	stats := a.drawer.Stats()
+	stats := a.linkage.Stats()
 	all, err := a.registry.Peers()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
@@ -201,7 +201,7 @@ func (a *API) forks(w http.ResponseWriter, _ *http.Request) {
 	for i, n := range nodes {
 		addresses[i] = n.AddressPort.Addr()
 	}
-	forks, err := a.drawer.Forks(addresses)
+	forks, err := a.linkage.Forks(addresses)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
@@ -223,7 +223,7 @@ func (a *API) allForks(w http.ResponseWriter, _ *http.Request) {
 	for i, n := range nodes {
 		addresses[i] = n.AddressPort.Addr()
 	}
-	forks, err := a.drawer.Forks(addresses)
+	forks, err := a.linkage.Forks(addresses)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
@@ -242,7 +242,7 @@ func (a *API) fork(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Invalid peer address '%s'", addr), http.StatusBadRequest)
 		return
 	}
-	fork, err := a.drawer.Fork(peer)
+	fork, err := a.linkage.Fork(peer)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return

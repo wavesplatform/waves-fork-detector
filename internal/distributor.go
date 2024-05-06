@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	rand2 "math/rand/v2"
 	"net"
 	"net/netip"
 	"time"
@@ -18,7 +17,7 @@ import (
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 
-	"github.com/alexeykiselev/waves-fork-detector/internal/blocks"
+	"github.com/alexeykiselev/waves-fork-detector/internal/chains"
 	"github.com/alexeykiselev/waves-fork-detector/internal/peers"
 )
 
@@ -30,139 +29,101 @@ type Distributor struct {
 
 	scheme   proto.Scheme
 	registry *peers.Registry
-	drawer   *blocks.Drawer
+	linkage  *chains.Linkage
 	parent   peer.Parent
 
-	timer *kairos.Timer
+	idsCh   chan IDsPackage
+	blockCh chan BlockPackage
 
-	loaderCh chan struct{}
-	loading  bool
+	timer *kairos.Timer
 }
 
 func NewDistributor(
-	scheme proto.Scheme, drawer *blocks.Drawer, registry *peers.Registry, parent peer.Parent,
+	scheme proto.Scheme, linkage *chains.Linkage, registry *peers.Registry, parent peer.Parent,
 ) (*Distributor, error) {
+	idsCh := make(chan IDsPackage)
+	blockCh := make(chan BlockPackage)
 	return &Distributor{
 		scheme:   scheme,
-		drawer:   drawer,
+		linkage:  linkage,
 		registry: registry,
 		parent:   parent,
+		idsCh:    idsCh,
+		blockCh:  blockCh,
 		timer:    kairos.NewStoppedTimer(),
-		loaderCh: make(chan struct{}),
 	}, nil
 }
 
-func (l *Distributor) Run(ctx context.Context) {
+func (d *Distributor) Run(ctx context.Context) {
 	g, gc := errgroup.WithContext(ctx)
-	l.ctx = gc
-	l.wait = g.Wait
+	d.ctx = gc
+	d.wait = g.Wait
 
-	g.Go(l.runLoop)
-	g.Go(l.runLoader)
-
-	l.timer.Reset(pingInterval)
+	g.Go(d.runLoop)
+	d.timer.Reset(pingInterval)
 }
 
-func (l *Distributor) Shutdown() {
-	if err := l.wait(); err != nil {
+func (d *Distributor) Shutdown() {
+	if err := d.wait(); err != nil {
 		zap.S().Warnf("Failed to shutdown Distributor: %v", err)
 	}
+	close(d.idsCh)
+	close(d.blockCh)
 	zap.S().Info("Distributor shutdown successfully")
 }
 
-func (l *Distributor) runLoop() error {
+func (d *Distributor) IDsCh() <-chan IDsPackage {
+	return d.idsCh
+}
+
+func (d *Distributor) BlockCh() <-chan BlockPackage {
+	return d.blockCh
+}
+
+func (d *Distributor) runLoop() error {
 	for {
 		select {
-		case <-l.ctx.Done():
+		case <-d.ctx.Done():
 			zap.S().Debugf("[DTR] Distributor shutdown in progress...")
 			return nil
-
-		case <-l.timer.C:
+		case <-d.timer.C:
 			zap.S().Info("[DTR] Ping connections")
-			l.pingConnections()
-			l.timer.Reset(pingInterval)
-
-		case infoMessage := <-l.parent.InfoCh:
-			l.handleInfoMessage(infoMessage)
-		case message := <-l.parent.MessageCh:
-			l.handleMessage(message)
+			d.pingConnections()
+			d.timer.Reset(pingInterval)
+		case infoMessage := <-d.parent.InfoCh:
+			d.handleInfoMessage(infoMessage)
+		case message := <-d.parent.MessageCh:
+			d.handleMessage(message)
 		}
 	}
 }
 
-func (l *Distributor) runLoader() error {
-	for {
-		select {
-		case <-l.ctx.Done():
-			zap.S().Debugf("[DTR] Loader shutdown in progress...")
-			return nil
-		case <-l.loaderCh:
-			if l.loading {
-				continue
-			}
-			l.loading = true
-
-			// 1. Get Unleashed Connected Peers
-			// 2. Separate them by Scores.
-			groups := make(map[string][]peers.Peer)
-			connections := l.registry.Connections()
-			for _, cp := range connections {
-				unleashed, err := l.drawer.IsUnleashed(cp.AddressPort.Addr())
-				if err != nil {
-					zap.S().Warnf("[DTR] Failed to check if peer is unleashed: %v", err)
-					continue
-				}
-				if unleashed {
-					k := cp.Score.String()
-					if v, ok := groups[k]; ok {
-						groups[k] = append(v, cp)
-					} else {
-						groups[k] = []peers.Peer{cp}
-					}
-				}
-			}
-
-			// 3. Select random peer from every score group.
-
-			for _, group := range groups {
-				p := group[rand2.IntN(len(group))]
-				p.Send(&proto.GetBlockIdsMessage{Blocks: []proto.BlockID{}})
-			}
-
-			// 5. If peers returns the same set of signatures, request blocks from randomly selected one.
-			// 6. If peers returns different sets of signatures, request blocks from every peer separately.
-			// 7. Repeat after application of all blocks.
-
-		}
-	}
+func (d *Distributor) pingConnections() {
+	d.registry.Broadcast(&proto.GetPeersMessage{})
 }
 
-func (l *Distributor) pingConnections() {
-	l.registry.Broadcast(&proto.GetPeersMessage{})
-}
-
-func (l *Distributor) handleInfoMessage(msg peer.InfoMessage) {
+func (d *Distributor) handleInfoMessage(msg peer.InfoMessage) {
 	switch v := msg.Value.(type) {
 	case *peer.Connected:
-		l.handleConnected(v)
+		d.handleConnected(v)
 	case *peer.InternalErr:
-		l.handleInternalError(msg.Peer, v)
+		d.handleInternalError(msg.Peer, v)
 	}
 }
 
-func (l *Distributor) handleConnected(cm *peer.Connected) {
+func (d *Distributor) handleConnected(cm *peer.Connected) {
 	ap, err := netip.ParseAddrPort(cm.Peer.RemoteAddr().String())
 	if err != nil {
 		zap.S().Warnf("[DTR] Failed to parse address: %v", err)
 		return
 	}
-	if rpErr := l.registry.RegisterPeer(ap.Addr(), cm.Peer, cm.Peer.Handshake()); rpErr != nil {
+	if rpErr := d.registry.RegisterPeer(ap.Addr(), cm.Peer, cm.Peer.Handshake()); rpErr != nil {
 		zap.S().Warnf("[DTR] Failed to check peer: %v", rpErr)
 		return
 	}
 }
 
-func (l *Distributor) handleInternalError(peer peer.Peer, ie *peer.InternalErr) {
+func (d *Distributor) handleInternalError(peer peer.Peer, ie *peer.InternalErr) {
 	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
 	if err != nil {
 		zap.S().Warnf("[DTR] Failed to parse address: %v", err)
@@ -173,83 +134,84 @@ func (l *Distributor) handleInternalError(peer peer.Peer, ie *peer.InternalErr) 
 	if clErr := peer.Close(); clErr != nil {
 		zap.S().Warnf("[DTR] Failed to close peer connection: %v", clErr)
 	}
-	if urErr := l.registry.UnregisterPeer(ap.Addr()); urErr != nil {
+	if urErr := d.registry.UnregisterPeer(ap.Addr()); urErr != nil {
 		zap.S().Warnf("[DTR] Failed to unregister peer: %v", urErr)
 	}
 }
 
-func (l *Distributor) handleMessage(msg peer.ProtoMessage) {
+func (d *Distributor) handleMessage(msg peer.ProtoMessage) {
 	switch v := msg.Message.(type) {
 	case *proto.ScoreMessage:
-		l.handleScoreMessage(msg.ID, v.Score)
+		d.handleScoreMessage(msg.ID, v.Score)
 	case *proto.BlockMessage:
-		l.handleBlockMessage(msg.ID, v)
+		d.handleBlockMessage(msg.ID, v)
 	case *proto.PBBlockMessage:
-		l.handleProtoBlockMessage(msg.ID, v)
+		d.handleProtoBlockMessage(msg.ID, v)
 	case *proto.PeersMessage:
-		l.handlePeersMessage(v)
+		d.handlePeersMessage(v)
 	case *proto.GetPeersMessage:
-		l.handleGetPeersMessage(msg.ID)
+		d.handleGetPeersMessage(msg.ID)
 	case *proto.SignaturesMessage:
-		l.handleSignaturesMessage(msg.ID, v.Signatures)
+		d.handleSignaturesMessage(msg.ID, v.Signatures)
 	case *proto.BlockIdsMessage:
-		l.handleBlockIDsMessage(msg.ID, v.Blocks)
+		d.handleBlockIDsMessage(msg.ID, v.Blocks)
 	}
 }
 
-func (l *Distributor) handleScoreMessage(peer peer.Peer, score []byte) {
+func (d *Distributor) handleScoreMessage(peer peer.Peer, score []byte) {
 	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
 	if err != nil {
 		zap.S().Debugf("[DTR] Failed to parse peer address: %v", err)
 		return
 	}
 	s := big.NewInt(0).SetBytes(score)
-
-	err = l.registry.UpdatePeerScore(ap.Addr(), s)
+	zap.S().Debugf("[DTR] New score %s recevied from %s", s.String(), ap.Addr().String())
+	err = d.registry.UpdatePeerScore(ap.Addr(), s)
 	if err != nil {
 		zap.S().Debugf("[DTR] Failed to update score of peer '%s': %v", ap.String(), err)
 		return
 	}
-	// Notify loader.
-	l.loaderCh <- struct{}{}
 }
 
-func (l *Distributor) handleBlockMessage(peer peer.Peer, bm *proto.BlockMessage) {
+func (d *Distributor) handleBlockMessage(peer peer.Peer, bm *proto.BlockMessage) {
 	b := &proto.Block{}
-	if err := b.UnmarshalBinary(bm.BlockBytes, l.scheme); err != nil {
+	if err := b.UnmarshalBinary(bm.BlockBytes, d.scheme); err != nil {
 		zap.S().Warnf("[DTR] Failed to unmarshal block from peer '%s': %v", peer.RemoteAddr().String(), err)
 		return
 	}
 	zap.S().Infof("[DTR] Block '%s' received from peer '%s'", b.BlockID().String(), peer.RemoteAddr().String())
-	if err := l.handleBlock(b, peer.RemoteAddr()); err != nil {
+	if err := d.handleBlock(b, peer.RemoteAddr()); err != nil {
 		zap.S().Warnf("[DTR] Failed to handle block from peer '%s': %v", peer.RemoteAddr().String(), err)
 	}
 }
 
-func (l *Distributor) handleProtoBlockMessage(peer peer.Peer, bm *proto.PBBlockMessage) {
+func (d *Distributor) handleProtoBlockMessage(peer peer.Peer, bm *proto.PBBlockMessage) {
 	b := &proto.Block{}
 	if err := b.UnmarshalFromProtobuf(bm.PBBlockBytes); err != nil {
 		zap.S().Warnf("[DTR] Failed to unmarshal protobuf block from peer '%s': %v",
 			peer.RemoteAddr().String(), err)
+		return
 	}
 	zap.S().Infof("[DTR] Block '%s' received from peer '%s'", b.BlockID().String(), peer.RemoteAddr().String())
-	if err := l.handleBlock(b, peer.RemoteAddr()); err != nil {
+	if err := d.handleBlock(b, peer.RemoteAddr()); err != nil {
 		zap.S().Warnf("[DTR] Failed to handle block from peer '%s': %v", peer.RemoteAddr().String(), err)
 	}
 }
 
-func (l *Distributor) handleBlock(block *proto.Block, peer proto.TCPAddr) error {
-	ap, err := netip.ParseAddrPort(peer.String())
+func (d *Distributor) handleBlock(block *proto.Block, addr proto.TCPAddr) error {
+	ap, err := netip.ParseAddrPort(addr.String())
 	if err != nil {
-		return fmt.Errorf("failed to parse peer address: %w", err)
+		return fmt.Errorf("failed to parse peer remote address: %w", err)
 	}
-	if err = l.drawer.PutBlock(block, ap.Addr()); err != nil && !errors.Is(err, blocks.ErrParentNotFound) {
+	if putErr := d.linkage.PutBlock(block, ap.Addr()); putErr != nil && !errors.Is(putErr, chains.ErrParentNotFound) {
 		return fmt.Errorf("failed to append block: %w", err)
 	}
+	zap.S().Debugf("[DTR] Block '%s' from '%s' was appended", block.BlockID().String(), ap.Addr().String())
+	d.blockCh <- BlockPackage{peer: ap.Addr(), blockID: block.BlockID()} // Notify loader about new block received.
 	return nil
 }
 
-func (l *Distributor) handlePeersMessage(pm *proto.PeersMessage) {
+func (d *Distributor) handlePeersMessage(pm *proto.PeersMessage) {
 	zap.S().Debugf("[DTR] Received %d peers", len(pm.Peers))
 	addresses := make([]*net.TCPAddr, 0, len(pm.Peers))
 	for _, pi := range pm.Peers {
@@ -260,15 +222,15 @@ func (l *Distributor) handlePeersMessage(pm *proto.PeersMessage) {
 		}
 		addresses = append(addresses, net.TCPAddrFromAddrPort(ap))
 	}
-	cnt := l.registry.AppendAddresses(addresses)
+	cnt := d.registry.AppendAddresses(addresses)
 	if cnt > 0 {
 		zap.S().Infof("[DTR] Added %d new peers", cnt)
 	}
 }
 
-func (l *Distributor) handleGetPeersMessage(peer peer.Peer) {
+func (d *Distributor) handleGetPeersMessage(peer peer.Peer) {
 	zap.S().Debugf("[DTR] Get peers from %s", peer.RemoteAddr().String())
-	friendlyPeers, err := l.registry.FriendlyPeers()
+	friendlyPeers, err := d.registry.FriendlyPeers()
 	if err != nil {
 		zap.S().Warnf("[DTR] Failed to get peers: %v", err)
 		return
@@ -287,10 +249,26 @@ func (l *Distributor) handleGetPeersMessage(peer peer.Peer) {
 	peer.SendMessage(peersMessage)
 }
 
-func (l *Distributor) handleSignaturesMessage(peer peer.Peer, signatures []crypto.Signature) {
+func (d *Distributor) handleSignaturesMessage(peer peer.Peer, signatures []crypto.Signature) {
+	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
+	if err != nil {
+		zap.S().Errorf("[DTR] Failed to parse peer address: %v", err)
+		return
+	}
+	ids := make([]proto.BlockID, len(signatures))
+	for i, s := range signatures {
+		ids[i] = proto.NewBlockIDFromSignature(s)
+	}
 	zap.S().Debugf("[DTR] Signatures received from %s", peer.RemoteAddr().String())
+	d.idsCh <- IDsPackage{peer: ap.Addr(), ids: ids}
 }
 
-func (l *Distributor) handleBlockIDsMessage(peer peer.Peer, ids []proto.BlockID) {
+func (d *Distributor) handleBlockIDsMessage(peer peer.Peer, ids []proto.BlockID) {
+	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
+	if err != nil {
+		zap.S().Errorf("[DTR] Failed to parse peer address: %v", err)
+		return
+	}
 	zap.S().Debugf("[DTR] Block IDs received from %s", peer.RemoteAddr().String())
+	d.idsCh <- IDsPackage{peer: ap.Addr(), ids: ids}
 }

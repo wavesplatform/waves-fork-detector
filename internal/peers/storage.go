@@ -89,8 +89,9 @@ func (s *storage) peer(addr netip.Addr) (Peer, error) {
 		Nonce:       val.Nonce,
 		Name:        val.Name,
 		Version:     ver,
-		NextAttempt: val.NextAttempt,
 		State:       val.State,
+		NextAttempt: val.NextAttempt,
+		Score:       val.Score,
 	}, nil
 }
 
