@@ -143,7 +143,11 @@ func (a *API) status(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
 	}
-	connections := a.registry.Connections()
+	connections, err := a.registry.Connections()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
 	s := status{
 		ShortForksCount:     stats.Short,
 		LongForksCount:      stats.Long,
@@ -187,8 +191,12 @@ func (a *API) friendly(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *API) connections(w http.ResponseWriter, _ *http.Request) {
-	connections := a.registry.Connections()
-	err := json.NewEncoder(w).Encode(connections)
+	connections, err := a.registry.Connections()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	err = json.NewEncoder(w).Encode(connections)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal connections to JSON: %v", err), http.StatusInternalServerError)
 		return
@@ -196,7 +204,11 @@ func (a *API) connections(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *API) forks(w http.ResponseWriter, _ *http.Request) {
-	nodes := a.registry.Connections()
+	nodes, err := a.registry.Connections()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
 	addresses := make([]netip.Addr, len(nodes))
 	for i, n := range nodes {
 		addresses[i] = n.AddressPort.Addr()

@@ -51,10 +51,10 @@ func NewConnectionManager(
 		proto.ContentIDPBTransaction:             true,
 		proto.ContentIDGetBlockIDs:               true,
 		proto.ContentIDBlockIDs:                  false,
-		proto.ContentIDGetBlockSnapshot:          false,
-		proto.ContentIDMicroBlockSnapshot:        false,
-		proto.ContentIDBlockSnapshot:             false,
-		proto.ContentIDMicroBlockSnapshotRequest: false,
+		proto.ContentIDGetBlockSnapshot:          true,
+		proto.ContentIDMicroBlockSnapshot:        true,
+		proto.ContentIDBlockSnapshot:             true,
+		proto.ContentIDMicroBlockSnapshotRequest: true,
 	}
 	return &ConnectionManager{
 		network:   fmt.Sprintf("%s%c", defaultApplication, scheme),

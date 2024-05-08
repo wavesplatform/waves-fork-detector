@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	rand2 "math/rand/v2"
 	"net/netip"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rhansen/go-kairos/kairos"
+	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -73,6 +75,17 @@ func (q *queue) ready() bool {
 		}
 	}
 	return true
+}
+
+func (q *queue) len() int {
+	return len(q.q)
+}
+
+func (q *queue) rangeString() string {
+	if len(q.q) == 0 {
+		return "[]"
+	}
+	return fmt.Sprintf("[%s..%s]", q.q[0].received.ShortString(), q.q[len(q.q)-1].received.ShortString())
 }
 
 type peerState struct {
@@ -151,14 +164,23 @@ func (l *Loader) loop() error {
 func (l *Loader) sync() {
 	// Get lagging connected peers and separate them by scores.
 	groups := make(map[string][]peers.Peer)
-	connections := l.registry.Connections()
+	connections, err := l.registry.Connections()
+	if err != nil {
+		zap.S().Errorf("[LDR] Failed to get connections: %v", err)
+		return // Failed to get connections, try again later.
+	}
+	zap.S().Debugf("[LDR] Trying to sync with %d connections", len(connections))
 	for _, cp := range connections {
+		if _, ok := l.peers[cp.AddressPort.Addr()]; ok {
+			continue // Peer is already in the process of synchronization.
+		}
 		if cp.Score == nil {
+			zap.S().Debugf("[LDR] Peer '%s' has no score", cp.AddressPort.Addr().String())
 			continue // For this peer broadcast score is unknown, skip it.
 		}
-		score, err := l.linkage.LeashScore(cp.AddressPort.Addr())
-		if err != nil {
-			zap.S().Warnf("Failed to get peers score: %v", err)
+		score, lsErr := l.linkage.LeashScore(cp.AddressPort.Addr())
+		if lsErr != nil {
+			zap.S().Warnf("Failed to get peers score: %v", lsErr)
 			continue
 		}
 		// Peer's broadcast score is greater than peer's leash score that means we have to restore history chain
@@ -179,6 +201,7 @@ func (l *Loader) sync() {
 		return // Failed to get heads, try again later.
 	}
 	// Select random peer from every group and request signatures.
+	zap.S().Debugf("[LDR] Sync groups count: %d", len(groups))
 	for _, group := range groups {
 		p := group[rand2.IntN(len(group))] // Random peer.
 		var h chains.Head
@@ -217,17 +240,38 @@ func (l *Loader) syncByBlock(id proto.BlockID, p peers.Peer) error {
 }
 
 func (l *Loader) handleIDs(p IDsPackage) {
+	if len(p.ids) == 0 {
+		return // Ignore empty IDs.
+	}
+	req := make([]proto.BlockID, 0, len(p.ids))
+	for _, id := range p.ids {
+		ok, err := l.linkage.HasBlock(id) // Check if we have block with this ID.
+		if err != nil && !errors.Is(err, leveldb.ErrNotFound) {
+			zap.S().Errorf("[LDR] Failed to check block '%s': %v", id.String(), err)
+			return
+		}
+		if ok {
+			// Move leash to the peer.
+			if mvErr := l.linkage.MoveLeash(id, p.peer); mvErr != nil {
+				zap.S().Errorf("[LDR] Failed to move leash to '%s' for '%s': %v",
+					id.String(), p.peer.String(), mvErr)
+				return
+			}
+			continue
+		}
+		req = append(req, id) // We don't have the block, request it.
+	}
+	if len(req) == 0 {
+		return // Nothing to request.
+	}
 	state, ok := l.peers[p.peer]
 	if !ok {
 		return // Ignore IDs from unexpected peers.
 	}
-	if len(p.ids) == 0 {
-		return // Ignore empty IDs.
-	}
-	q := newQueue(p.ids)
+	q := newQueue(req)
 	zap.S().Debugf("[LDR] Requesting %d blocks for signatures [%s..%s] from %s",
-		len(p.ids), p.ids[0].ShortString(), p.ids[len(p.ids)-1].ShortString(), p.peer)
-	for _, id := range p.ids {
+		len(req), req[0].ShortString(), req[len(req)-1].ShortString(), p.peer)
+	for _, id := range req {
 		state.peer.RequestBlock(id)
 	}
 	state.queue = q
@@ -241,6 +285,8 @@ func (l *Loader) handleBlock(p BlockPackage) {
 	}
 	state.queue.put(p.blockID) // Put received block in peers queue, unrequested blocks are ignored.
 	if state.queue.ready() {
+		zap.S().Debugf("[LDR] Received all %d blocks for signatures %s from %s",
+			state.queue.len(), state.queue.rangeString(), p.peer)
 		leash, err := l.linkage.Leash(p.peer)
 		if err != nil {
 			zap.S().Errorf("[LDR] Failed to get last block of peer '%s': %v", p.peer.String(), err)

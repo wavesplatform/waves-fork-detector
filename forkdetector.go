@@ -74,6 +74,8 @@ func run() error {
 	}
 	defer linkage.Close()
 
+	linkage.LogInitialStats()
+
 	api, err := internal.NewAPI(reg, linkage, p.apiBind)
 	if err != nil {
 		return fmt.Errorf("failed to create API server: %w", err)

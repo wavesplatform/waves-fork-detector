@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"net"
 	"net/netip"
 
 	"github.com/wavesplatform/gowaves/pkg/proto"
@@ -31,13 +32,27 @@ func numKeyFromBytes(data []byte) (byte, uint64) {
 	return data[0], binary.BigEndian.Uint64(data[prefixSize:])
 }
 
-func addrKeyBytes(prefix byte, addr netip.Addr) []byte {
+func addrKeyBytes(addr netip.Addr) []byte {
 	const bitsInByte = 8
 	s := addr.BitLen() / bitsInByte
 	buf := make([]byte, prefixSize+s)
-	buf[0] = prefix
+	buf[0] = leashPrefix
 	copy(buf[prefixSize:], addr.AsSlice())
 	return buf
+}
+
+func addrKeyFromBytes(data []byte) netip.Addr {
+	if l := len(data); l != prefixSize+net.IPv4len && l != prefixSize+net.IPv6len {
+		panic(fmt.Sprintf("invalid size %d of key", l))
+	}
+	if data[0] != leashPrefix {
+		panic("invalid key prefix")
+	}
+	addr, ok := netip.AddrFromSlice(data[prefixSize:])
+	if !ok {
+		panic("invalid IP address")
+	}
+	return addr
 }
 
 type block struct {

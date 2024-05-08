@@ -28,7 +28,7 @@ type Registry struct {
 	storage  *storage
 
 	mu          sync.Mutex
-	connections map[netip.Addr]Peer
+	connections map[netip.Addr]peer.Peer
 	pending     map[netip.Addr]struct{}
 }
 
@@ -51,7 +51,7 @@ func NewRegistry(
 		declared:    ap.Addr(),
 		versions:    newVersions(versions),
 		storage:     s,
-		connections: make(map[netip.Addr]Peer),
+		connections: make(map[netip.Addr]peer.Peer),
 		pending:     make(map[netip.Addr]struct{}),
 	}, nil
 }
@@ -116,7 +116,7 @@ func (r *Registry) RegisterPeer(addr netip.Addr, np peer.Peer, handshake proto.H
 	p.NextAttempt = time.Now().Round(time.Second)
 	p.p = np
 
-	r.connections[addr] = p
+	r.connections[addr] = np
 
 	return r.storage.putPeer(p)
 }
@@ -202,18 +202,23 @@ func (r *Registry) MarkAsHostile(addr net.Addr) error {
 }
 
 // Connections returns the list of active connections.
-func (r *Registry) Connections() []Peer {
+func (r *Registry) Connections() ([]Peer, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	connections := make([]Peer, len(r.connections))
 	i := 0
-	for _, p := range r.connections {
-		connections[i] = p
+	for a, p := range r.connections {
+		sp, err := r.storage.peer(a)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get active connetcions: %w", err)
+		}
+		sp.p = p
+		connections[i] = sp
 		i++
 	}
 	sort.Sort(ByName(connections))
-	return connections
+	return connections, nil
 }
 
 // AppendAddresses adds new addresses to the storage filtering out already known addresses.
@@ -349,7 +354,7 @@ func (r *Registry) Broadcast(msg proto.Message) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, p := range r.connections {
-		p.Send(msg)
+		p.SendMessage(msg)
 	}
 }
 

@@ -116,6 +116,75 @@ func (l *Linkage) LastIDs(id proto.BlockID, count int) ([]proto.BlockID, error) 
 	return l.st.getAncestors(id, count)
 }
 
+func (l *Linkage) HasBlock(id proto.BlockID) (bool, error) {
+	return l.hasBlock(id)
+}
+
+func (l *Linkage) Block(id proto.BlockID) (Block, error) {
+	b, err := l.st.block(id)
+	if err != nil {
+		return Block{}, err
+	}
+	bID, err := proto.NewBlockIDFromBytes(b.ID)
+	if err != nil {
+		return Block{}, fmt.Errorf("failed to get block: %w", err)
+	}
+	var pID proto.BlockID
+	if len(b.Parent) > 0 {
+		pID, err = proto.NewBlockIDFromBytes(b.Parent)
+		if err != nil {
+			return Block{}, fmt.Errorf("failed to get block: %w", err)
+		}
+	}
+	ga, err := proto.NewAddressFromBytes(b.Generator)
+	if err != nil {
+		return Block{}, fmt.Errorf("failed to get block: %w", err)
+	}
+	return Block{
+		ID:        bID,
+		Parent:    pID,
+		Height:    b.Height,
+		Generator: ga,
+		Score:     b.Score,
+		Timestamp: b.Timestamp,
+	}, nil
+}
+
+func (l *Linkage) MoveLeash(id proto.BlockID, addr netip.Addr) error {
+	return l.st.updateLeash(addr, id)
+}
+
+func (l *Linkage) LogInitialStats() {
+	heads, err := l.st.heads()
+	if err != nil {
+		zap.S().Errorf("Failed to log statistics: %v", err)
+		return
+	}
+	zap.S().Infof("Heads count in storage: %d", len(heads))
+	for _, head := range heads {
+		b, blErr := l.Block(head.BlockID)
+		if blErr != nil {
+			zap.S().Errorf("Failed to get block: %v", blErr)
+			return
+		}
+		zap.S().Infof("Head #%d '%s' at height %d", head.ID, head.BlockID.String(), b.Height)
+	}
+	leashes, err := l.st.leashes()
+	if err != nil {
+		zap.S().Errorf("Failed to log statistics: %v", err)
+		return
+	}
+	zap.S().Infof("Leashes count in storage: %d", len(leashes))
+	for _, addr := range leashes {
+		id, lshErr := l.Leash(addr)
+		if lshErr != nil {
+			zap.S().Errorf("Failed to log statistics: %v", lshErr)
+			return
+		}
+		zap.S().Infof("Peer '%s' on block '%s'", addr.String(), id.String())
+	}
+}
+
 func (l *Linkage) Stats() Stats {
 	return Stats{}
 }

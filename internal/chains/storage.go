@@ -26,7 +26,6 @@ const (
 
 const (
 	counterPrefix byte = iota
-	idPrefix
 	blockPrefix
 	chainPrefix
 	leashPrefix
@@ -291,6 +290,28 @@ func (s *storage) updateLeash(addr netip.Addr, id proto.BlockID) error {
 	return nil
 }
 
+func (s *storage) leashes() ([]netip.Addr, error) {
+	sn, err := s.db.GetSnapshot()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get leashes: %w", err)
+	}
+	defer sn.Release()
+	r := make([]netip.Addr, 0)
+	rng := &util.Range{
+		Start: addrKeyBytes(netip.AddrFrom4([...]byte{0x00, 0x00, 0x00, 0x00})),
+		Limit: addrKeyBytes(netip.AddrFrom16([...]byte{
+			0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		})),
+	}
+	it := sn.NewIterator(rng, nil)
+	defer it.Release()
+	for it.First(); it.Valid(); it.Next() {
+		addr := addrKeyFromBytes(it.Key())
+		r = append(r, addr)
+	}
+	return r, nil
+}
+
 func (s *storage) heads() ([]Head, error) {
 	sn, err := s.db.GetSnapshot()
 	if err != nil {
@@ -453,7 +474,7 @@ func (s *storage) getLinkByID(sn *leveldb.Snapshot, id proto.BlockID) (link, err
 }
 
 func (s *storage) getLeash(sn *leveldb.Snapshot, addr netip.Addr) (proto.BlockID, error) {
-	v, err := sn.Get(addrKeyBytes(leashPrefix, addr), nil)
+	v, err := sn.Get(addrKeyBytes(addr), nil)
 	if err != nil {
 		return proto.BlockID{}, fmt.Errorf("failed to get leash for '%s': %w", addr.String(), err)
 	}
@@ -468,7 +489,7 @@ func (s *storage) getLeash(sn *leveldb.Snapshot, addr netip.Addr) (proto.BlockID
 }
 
 func (s *storage) putLeash(batch *leveldb.Batch, addr netip.Addr, id proto.BlockID) {
-	batch.Put(addrKeyBytes(leashPrefix, addr), id.Bytes())
+	batch.Put(addrKeyBytes(addr), id.Bytes())
 }
 
 func (s *storage) putHead(sn *leveldb.Snapshot, batch *leveldb.Batch, blockNum, parentNum uint64) error {

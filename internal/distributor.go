@@ -269,6 +269,7 @@ func (d *Distributor) handleBlockIDsMessage(peer peer.Peer, ids []proto.BlockID)
 		zap.S().Errorf("[DTR] Failed to parse peer address: %v", err)
 		return
 	}
-	zap.S().Debugf("[DTR] Block IDs received from %s", peer.RemoteAddr().String())
+	zap.S().Debugf("[DTR] Block IDs [%s..%s] received from %s",
+		ids[0].ShortString(), ids[len(ids)-1].ShortString(), peer.RemoteAddr().String())
 	d.idsCh <- IDsPackage{peer: ap.Addr(), ids: ids}
 }

@@ -31,3 +31,36 @@ func TestPutGetPeer(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, p, p2)
 }
+
+func TestUpdateScore(t *testing.T) {
+	st, err := newStorage(t.TempDir())
+	require.NoError(t, err)
+	ap := netip.MustParseAddrPort("8.8.8.8:12345")
+	p := Peer{
+		AddressPort: ap,
+		Nonce:       1234567890,
+		Name:        "name",
+		Version:     proto.NewVersion(1, 2, 3),
+		State:       1,
+		NextAttempt: time.Now().Add(time.Hour).Round(time.Second),
+		Score:       big.NewInt(123),
+		p:           nil,
+	}
+	err = st.putPeer(p)
+	require.NoError(t, err)
+	p2, err := st.peer(ap.Addr())
+	require.NoError(t, err)
+	assert.Equal(t, p, p2)
+
+	p3, err := st.peer(ap.Addr())
+	require.NoError(t, err)
+	p3.Score = big.NewInt(345)
+
+	err = st.putPeer(p3)
+	require.NoError(t, err)
+
+	p4, err := st.peer(ap.Addr())
+	require.NoError(t, err)
+	assert.Equal(t, p3, p4)
+	assert.NotEqual(t, p, p4)
+}
