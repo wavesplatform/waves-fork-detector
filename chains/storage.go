@@ -176,6 +176,63 @@ func (s *storage) putProtoBlock(block *proto.Block) error {
 	return s.db.Write(batch, nil)
 }
 
+func (s *storage) putMicroBlock(inv *proto.MicroBlockInv) error {
+	sn, err := s.db.GetSnapshot()
+	if err != nil {
+		return fmt.Errorf("failed to put micro-block: %w", err)
+	}
+	defer sn.Release()
+	n, err := s.getCounter(sn, blocksCounter)
+	if err != nil {
+		return fmt.Errorf("failed to put micro-block: %w", err)
+	}
+	// Get reference block and its number.
+	refNum, err := s.getNumOfBlockID(sn, inv.Reference)
+	if err != nil {
+		return fmt.Errorf("failed to put micro-block: %w", err)
+	}
+
+	ref, err := s.getBlock(sn, refNum)
+	if err != nil {
+		return fmt.Errorf("failed to put micro-block: %w", err)
+	}
+
+	parentID, err := proto.NewBlockIDFromBytes(ref.Parent)
+	if err != nil {
+		return fmt.Errorf("failed to put micro-block: %w", err)
+	}
+
+	batch := new(leveldb.Batch)
+
+	// Put next block number.
+	n++
+	s.putCounter(batch, blocksCounter, n)
+
+	b := block{
+		Height:    ref.Height,
+		Timestamp: ref.Timestamp,
+		Score:     ref.Score,
+		ID:        inv.TotalBlockID.Bytes(),
+		Parent:    ref.Parent,
+		Generator: ref.Generator,
+	}
+
+	s.putID(batch, blockPrefix, inv.TotalBlockID, n) // Save reference ID -> num.
+	// Put information about block by its number.
+	if putErr := s.putBlock(batch, n, b); putErr != nil {
+		return fmt.Errorf("failed to put micro-block: %w", putErr)
+	}
+
+	// Put block into the chain.
+	if lnkErr := s.putNewLinkForBlock(sn, batch, n, inv.TotalBlockID, b.Height, parentID); lnkErr != nil {
+		return fmt.Errorf("failed to put micro-block: %w", lnkErr)
+	}
+	if phErr := s.putHead(sn, batch, n, refNum); phErr != nil {
+		return fmt.Errorf("failed to put micro-block: %w", phErr)
+	}
+	return s.db.Write(batch, nil)
+}
+
 func (s *storage) getAncestors(id proto.BlockID, count int) ([]proto.BlockID, error) {
 	sn, err := s.db.GetSnapshot()
 	if err != nil {
@@ -397,7 +454,7 @@ func (s *storage) putNewLinkForBlock(
 		parents = append(parents, pn)
 		pl, glErr := s.getLink(sn, pn)
 		if glErr != nil {
-			return err
+			return glErr
 		}
 		if len(pl.Parents) > l {
 			pn = pl.Parents[l]

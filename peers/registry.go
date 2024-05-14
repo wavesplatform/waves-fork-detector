@@ -231,20 +231,20 @@ func (r *Registry) AppendAddresses(addresses []*net.TCPAddr) int {
 	for i := range addresses {
 		ap, err := netip.ParseAddrPort(addresses[i].String())
 		if err != nil {
-			zap.S().Warnf("Error adding address: %v", err)
+			zap.S().Debugf("Error adding address: %v", err)
 			continue
 		}
 		if ap.Addr().IsLoopback() {
-			zap.S().Warnf("Skipping loopback address: %s", ap.String())
+			zap.S().Debugf("Skipping loopback address: %s", ap.String())
 			continue
 		}
 		if ap.Addr().Compare(r.declared) == 0 {
-			zap.S().Warnf("Skipping self address: %s", ap.String())
+			zap.S().Debugf("Skipping self address: %s", ap.String())
 			continue
 		}
 		yes, err := r.storage.hasPeer(ap.Addr())
 		if err != nil {
-			zap.S().Warnf("Failed to append addresses: %v", err)
+			zap.S().Debugf("Failed to append addresses: %v", err)
 			return count
 		}
 		if !yes {

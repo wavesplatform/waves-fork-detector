@@ -1,0 +1,18 @@
+quiet: False
+disable-version-string: True
+with-expecter: True
+mockname: "Mock{{.InterfaceName}}"
+filename: "{{.InterfaceName | snakecase}}.go"
+
+inpackage: True
+
+packages:
+  github.com/alexeykiselev/waves-fork-detector/peers:
+    interfaces:
+      HistoryRequester:
+  github.com/alexeykiselev/waves-fork-detector/chains:
+    interfaces:
+      HistoryProvider:
+  github.com/alexeykiselev/waves-fork-detector/loading:
+    interfaces:
+      Reporter:

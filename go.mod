@@ -5,6 +5,7 @@ go 1.22.1
 require (
 	github.com/fxamacker/cbor/v2 v2.6.0
 	github.com/go-chi/chi/v5 v5.0.12
+	github.com/qmuntal/stateless v1.6.9
 	github.com/rhansen/go-kairos v0.0.0-20230622235007-87f08a46d19b
 	github.com/stretchr/testify v1.9.0
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
@@ -36,6 +37,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rs/zerolog v1.30.0 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/umbracle/fastrlp v0.1.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect

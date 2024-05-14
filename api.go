@@ -1,4 +1,4 @@
-package internal
+package main
 
 import (
 	"compress/flate"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/netip"
 	"runtime"
@@ -16,8 +17,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/alexeykiselev/waves-fork-detector/internal/chains"
-	"github.com/alexeykiselev/waves-fork-detector/internal/peers"
+	"github.com/alexeykiselev/waves-fork-detector/chains"
+	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -56,6 +57,14 @@ type status struct {
 	ConnectedPeersCount int `json:"connected_peers_count"`
 	TotalBlocksCount    int `json:"total_blocks_count"`
 	GoroutinesCount     int `json:"goroutines_count"`
+}
+
+type HeadInfo struct {
+	Number    uint64    `json:"number"`
+	ID        string    `json:"id"`
+	Height    uint32    `json:"height"`
+	Score     *big.Int  `json:"score"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 type API struct {
@@ -120,13 +129,15 @@ func (a *API) runServer() error {
 
 func (a *API) routes() chi.Router {
 	r := chi.NewRouter()
-	r.Get("/status", a.status)           // Status information
 	r.Get("/peers/all", a.peers)         // Returns the list of all known peers
 	r.Get("/peers/friendly", a.friendly) // Returns the list of peers that have been successfully connected at least once
 	r.Get("/connections", a.connections) // Returns the list of active connections
-	r.Get("/forks", a.forks)             // Returns the combined info about forks for all connected peers
-	r.Get("/all-forks", a.allForks)      // Returns the combined info about all registered forks
-	r.Get("/fork/{address}", a.fork)     // Returns the info about fork of the given peer
+	r.Get("/heads", a.heads)             // Returns the combined info about heads for all connected peers
+
+	r.Get("/status", a.status)       // Status information
+	r.Get("/forks", a.forks)         // Returns the combined info about forks for all connected peers
+	r.Get("/all-forks", a.allForks)  // Returns the combined info about all registered forks
+	r.Get("/fork/{address}", a.fork) // Returns the info about fork of the given peer
 	return r
 }
 
@@ -199,6 +210,34 @@ func (a *API) connections(w http.ResponseWriter, _ *http.Request) {
 	err = json.NewEncoder(w).Encode(connections)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal connections to JSON: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (a *API) heads(w http.ResponseWriter, _ *http.Request) {
+	heads, err := a.linkage.Heads()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	infos := make([]HeadInfo, len(heads))
+	for i, h := range heads {
+		b, blErr := a.linkage.Block(h.BlockID)
+		if blErr != nil {
+			http.Error(w, fmt.Sprintf("Failed to complete request: %v", blErr), http.StatusInternalServerError)
+			return
+		}
+		infos[i] = HeadInfo{
+			Number:    h.ID,
+			ID:        h.BlockID.String(),
+			Height:    b.Height,
+			Score:     b.Score,
+			Timestamp: time.UnixMilli(int64(b.Timestamp)),
+		}
+	}
+	err = json.NewEncoder(w).Encode(infos)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal heads to JSON: %v", err), http.StatusInternalServerError)
 		return
 	}
 }

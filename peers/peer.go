@@ -14,16 +14,21 @@ import (
 	"github.com/wavesplatform/gowaves/pkg/proto"
 )
 
+type HistoryRequester interface {
+	ID() netip.Addr
+	RequestBlockIDs(ids []proto.BlockID)
+	RequestBlock(id proto.BlockID)
+}
+
 type Peer struct {
-	AddressPort       netip.AddrPort `json:"address"`
-	Nonce             uint64         `json:"nonce"`
-	Name              string         `json:"name"`
-	Version           proto.Version  `json:"version"`
-	State             State          `json:"state"`
-	NextAttempt       time.Time      `json:"next_attempt"`
-	Score             *big.Int       `json:"score"`
-	UnsuccessfulHeads []uint64       `json:"-"`
-	p                 peer.Peer
+	AddressPort netip.AddrPort `json:"address"`
+	Nonce       uint64         `json:"nonce"`
+	Name        string         `json:"name"`
+	Version     proto.Version  `json:"version"`
+	State       State          `json:"state"`
+	NextAttempt time.Time      `json:"next_attempt"`
+	Score       *big.Int       `json:"score"`
+	p           peer.Peer
 }
 
 func (p *Peer) String() string {
@@ -33,6 +38,10 @@ func (p *Peer) String() string {
 	}
 	return fmt.Sprintf("%s-%d '%s' v%s (%s; %s; %s)", p.AddressPort.String(), p.Nonce, p.Name, p.Version, p.State,
 		p.NextAttempt.Format(time.RFC3339), sc.String())
+}
+
+func (p *Peer) ID() netip.Addr {
+	return p.AddressPort.Addr()
 }
 
 func (p *Peer) TCPAddr() *net.TCPAddr {

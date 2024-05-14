@@ -1,4 +1,4 @@
-package internal
+package main
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/rhansen/go-kairos/kairos"
 
-	"github.com/alexeykiselev/waves-fork-detector/internal/peers"
+	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
 
 const respawnInterval = 10 * time.Second

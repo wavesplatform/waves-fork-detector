@@ -11,10 +11,21 @@ import (
 )
 
 var (
-	ErrBlockNotFound  = fmt.Errorf("block not found")
-	ErrUnleashedPeer  = fmt.Errorf("peer not leashed")
 	ErrParentNotFound = fmt.Errorf("parent not found")
+	ErrRefNotFound    = fmt.Errorf("reference block not found")
 )
+
+type Leasher interface {
+	Leash(addr netip.Addr) (proto.BlockID, error)
+	MoveLeash(id proto.BlockID, addr netip.Addr) error
+}
+
+type HistoryProvider interface {
+	Leasher
+	HasBlock(id proto.BlockID) (bool, error)
+	LastIDs(id proto.BlockID, count int) ([]proto.BlockID, error)
+	PutBlock(block *proto.Block, addr netip.Addr) error
+}
 
 type Linkage struct {
 	scheme  proto.Scheme
@@ -72,11 +83,39 @@ func (l *Linkage) PutBlock(block *proto.Block, addr netip.Addr) error {
 	return nil
 }
 
+func (l *Linkage) PutMicroBlock(inv *proto.MicroBlockInv, addr netip.Addr) error {
+	ok, err := l.st.hasBlock(inv.TotalBlockID)
+	if err != nil {
+		return err
+	}
+	if ok {
+		if ulErr := l.st.updateLeash(addr, inv.TotalBlockID); ulErr != nil {
+			return ulErr
+		}
+		return nil
+	}
+	hasRef, err := l.st.hasBlock(inv.Reference)
+	if err != nil {
+		return err
+	}
+	if !hasRef {
+		return ErrRefNotFound
+	}
+	if insErr := l.st.putMicroBlock(inv); insErr != nil {
+		return insErr
+	}
+	if ulErr := l.st.updateLeash(addr, inv.TotalBlockID); ulErr != nil {
+		return ulErr
+	}
+	return nil
+}
+
+// Leash return the block ID the peer is leashed to. For an unleashed peer the genesis block ID is returned.
 func (l *Linkage) Leash(addr netip.Addr) (proto.BlockID, error) {
 	lsh, err := l.st.leash(addr)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			return proto.BlockID{}, ErrUnleashedPeer
+			return l.genesis, nil // Return genesis block ID in case of no leash for the peer.
 		}
 		return proto.BlockID{}, err
 	}

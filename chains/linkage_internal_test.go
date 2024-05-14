@@ -33,8 +33,9 @@ func TestLeashUpdate(t *testing.T) {
 	bl3 := createNthBlock(t, bl2.BlockID(), 3)
 
 	a := netip.MustParseAddr("8.8.8.8")
-	_, err := lk.Leash(a)
-	assert.ErrorIs(t, err, ErrUnleashedPeer)
+	id, err := lk.Leash(a)
+	assert.NoError(t, err)
+	assert.Equal(t, id1, id)
 
 	err = lk.PutBlock(bl2, a)
 	require.NoError(t, err)
@@ -42,7 +43,7 @@ func TestLeashUpdate(t *testing.T) {
 	ok, err := lk.hasBlock(bl2.BlockID())
 	require.NoError(t, err)
 	assert.True(t, ok)
-	id, err := lk.Leash(a)
+	id, err = lk.Leash(a)
 	require.NoError(t, err)
 	assert.Equal(t, bl2.BlockID(), id)
 
@@ -66,15 +67,17 @@ func TestMultipleLeashes(t *testing.T) {
 	a := netip.MustParseAddr("8.8.8.8")
 	b := netip.MustParseAddr("9.9.9.9")
 
-	_, err := lk.Leash(a)
-	assert.ErrorIs(t, err, ErrUnleashedPeer)
-	_, err = lk.Leash(b)
-	assert.ErrorIs(t, err, ErrUnleashedPeer)
+	id, err := lk.Leash(a)
+	assert.NoError(t, err)
+	assert.Equal(t, id1, id)
+	id, err = lk.Leash(b)
+	assert.NoError(t, err)
+	assert.Equal(t, id1, id)
 
 	err = lk.PutBlock(bl2, a)
 	require.NoError(t, err)
 
-	id, err := lk.Leash(a)
+	id, err = lk.Leash(a)
 	require.NoError(t, err)
 	assert.Equal(t, bl2.BlockID(), id)
 

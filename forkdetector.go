@@ -14,9 +14,9 @@ import (
 	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
 
-	"github.com/alexeykiselev/waves-fork-detector/internal"
-	"github.com/alexeykiselev/waves-fork-detector/internal/chains"
-	"github.com/alexeykiselev/waves-fork-detector/internal/peers"
+	"github.com/alexeykiselev/waves-fork-detector/chains"
+	"github.com/alexeykiselev/waves-fork-detector/loading"
+	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
 
 var (
@@ -76,28 +76,25 @@ func run() error {
 
 	linkage.LogInitialStats()
 
-	api, err := internal.NewAPI(reg, linkage, p.apiBind)
+	api, err := NewAPI(reg, linkage, p.apiBind)
 	if err != nil {
 		return fmt.Errorf("failed to create API server: %w", err)
 	}
 	api.Run(ctx)
 
 	parent := peer.NewParent(false)
-	connManger := internal.NewConnectionManager(p.scheme, p.name, p.nonce, p.declaredAddress, reg, parent)
+	connManger := NewConnectionManager(p.scheme, p.name, p.nonce, p.declaredAddress, reg, parent)
 
-	listener := internal.NewListener(p.netBind, p.declaredAddress, connManger)
+	listener := NewListener(p.netBind, p.declaredAddress, connManger)
 	listener.Run(ctx)
 
-	respawn := internal.NewRespawn(reg, connManger)
+	respawn := NewRespawn(reg, connManger)
 	respawn.Run(ctx)
 
-	distributor, err := internal.NewDistributor(p.scheme, linkage, reg, parent)
-	if err != nil {
-		return fmt.Errorf("failed to instantiate distributor: %w", err)
-	}
+	distributor := NewDistributor(p.scheme, linkage, reg, parent)
 	distributor.Run(ctx)
 
-	loader := internal.NewLoader(reg, linkage, distributor.IDsCh(), distributor.BlockCh())
+	loader := loading.NewLoader(reg, linkage, distributor.IDsCh(), distributor.BlockCh())
 	loader.Run(ctx)
 
 	<-ctx.Done()

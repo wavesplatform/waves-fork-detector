@@ -1,4 +1,4 @@
-package internal
+package main
 
 import (
 	"context"
@@ -17,8 +17,9 @@ import (
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 
-	"github.com/alexeykiselev/waves-fork-detector/internal/chains"
-	"github.com/alexeykiselev/waves-fork-detector/internal/peers"
+	"github.com/alexeykiselev/waves-fork-detector/chains"
+	"github.com/alexeykiselev/waves-fork-detector/loading"
+	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
 
 const pingInterval = 1 * time.Minute
@@ -32,17 +33,17 @@ type Distributor struct {
 	linkage  *chains.Linkage
 	parent   peer.Parent
 
-	idsCh   chan IDsPackage
-	blockCh chan BlockPackage
+	idsCh   chan loading.IDsPackage
+	blockCh chan loading.BlockPackage
 
 	timer *kairos.Timer
 }
 
 func NewDistributor(
 	scheme proto.Scheme, linkage *chains.Linkage, registry *peers.Registry, parent peer.Parent,
-) (*Distributor, error) {
-	idsCh := make(chan IDsPackage)
-	blockCh := make(chan BlockPackage)
+) *Distributor {
+	idsCh := make(chan loading.IDsPackage)
+	blockCh := make(chan loading.BlockPackage)
 	return &Distributor{
 		scheme:   scheme,
 		linkage:  linkage,
@@ -51,7 +52,7 @@ func NewDistributor(
 		idsCh:    idsCh,
 		blockCh:  blockCh,
 		timer:    kairos.NewStoppedTimer(),
-	}, nil
+	}
 }
 
 func (d *Distributor) Run(ctx context.Context) {
@@ -72,11 +73,11 @@ func (d *Distributor) Shutdown() {
 	zap.S().Info("Distributor shutdown successfully")
 }
 
-func (d *Distributor) IDsCh() <-chan IDsPackage {
+func (d *Distributor) IDsCh() <-chan loading.IDsPackage {
 	return d.idsCh
 }
 
-func (d *Distributor) BlockCh() <-chan BlockPackage {
+func (d *Distributor) BlockCh() <-chan loading.BlockPackage {
 	return d.blockCh
 }
 
@@ -155,6 +156,8 @@ func (d *Distributor) handleMessage(msg peer.ProtoMessage) {
 		d.handleSignaturesMessage(msg.ID, v.Signatures)
 	case *proto.BlockIdsMessage:
 		d.handleBlockIDsMessage(msg.ID, v.Blocks)
+	case *proto.MicroBlockInvMessage:
+		d.handleMicroBlockInvMessage(msg.ID, v)
 	}
 }
 
@@ -207,7 +210,7 @@ func (d *Distributor) handleBlock(block *proto.Block, addr proto.TCPAddr) error 
 		return fmt.Errorf("failed to append block: %w", err)
 	}
 	zap.S().Debugf("[DTR] Block '%s' from '%s' was appended", block.BlockID().String(), ap.Addr().String())
-	d.blockCh <- BlockPackage{peer: ap.Addr(), blockID: block.BlockID()} // Notify loader about new block received.
+	d.blockCh <- loading.BlockPackage{Peer: ap.Addr(), Block: block}
 	return nil
 }
 
@@ -260,7 +263,7 @@ func (d *Distributor) handleSignaturesMessage(peer peer.Peer, signatures []crypt
 		ids[i] = proto.NewBlockIDFromSignature(s)
 	}
 	zap.S().Debugf("[DTR] Signatures received from %s", peer.RemoteAddr().String())
-	d.idsCh <- IDsPackage{peer: ap.Addr(), ids: ids}
+	d.idsCh <- loading.IDsPackage{Peer: ap.Addr(), IDs: ids}
 }
 
 func (d *Distributor) handleBlockIDsMessage(peer peer.Peer, ids []proto.BlockID) {
@@ -271,5 +274,23 @@ func (d *Distributor) handleBlockIDsMessage(peer peer.Peer, ids []proto.BlockID)
 	}
 	zap.S().Debugf("[DTR] Block IDs [%s..%s] received from %s",
 		ids[0].ShortString(), ids[len(ids)-1].ShortString(), peer.RemoteAddr().String())
-	d.idsCh <- IDsPackage{peer: ap.Addr(), ids: ids}
+	d.idsCh <- loading.IDsPackage{Peer: ap.Addr(), IDs: ids}
+}
+
+func (d *Distributor) handleMicroBlockInvMessage(peer peer.Peer, msg *proto.MicroBlockInvMessage) {
+	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
+	if err != nil {
+		zap.S().Errorf("[DTR] Failed to parse peer address: %v", err)
+		return
+	}
+	inv := &proto.MicroBlockInv{}
+	if umErr := inv.UnmarshalBinary(msg.Body); umErr != nil {
+		zap.S().Errorf("[DTR] Failed to unmarshal MicroBlockInv message: %v", umErr)
+		return
+	}
+	if putErr := d.linkage.PutMicroBlock(inv, ap.Addr()); putErr != nil {
+		zap.S().Errorf("[DTR] Failed to append micro-block '%s': %v", inv.TotalBlockID.String(), putErr)
+		return
+	}
+	zap.S().Debugf("[DTR] MicroBlockInv '%s' received from peer '%s'", inv.TotalBlockID.String(), ap.String())
 }

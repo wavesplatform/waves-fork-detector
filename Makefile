@@ -70,3 +70,6 @@ dist: clean release
 	@cd ./build/bin/darwin-amd64/; tar pzcvf ../../dist/forkdetector_$(VERSION)_macOS-amd64.tar.gz ./forkdetector*
 	@cd ./build/bin/darwin-arm64/; tar pzcvf ../../dist/forkdetector_$(VERSION)_macOS-arm64.tar.gz ./forkdetector*
 
+
+mock:
+	@mockery
