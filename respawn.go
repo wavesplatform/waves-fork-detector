@@ -58,9 +58,9 @@ func (r *Respawn) handleEvents() error {
 		case <-r.timer.C:
 			addresses, err := r.reg.TakeAvailableAddresses()
 			if len(addresses) > 0 {
-				zap.S().Infof("Try to establish connections to %d available addresses", len(addresses))
+				zap.S().Infof("Trying to establish connections to %d available addresses", len(addresses))
 			} else {
-				zap.S().Debugf("No available addresses to establish connections")
+				zap.S().Debugf("[RSP] No available addresses to establish connections")
 			}
 
 			if err != nil {
@@ -78,7 +78,7 @@ func (r *Respawn) establishConnections(addresses []netip.AddrPort) {
 		go func(ap netip.AddrPort) {
 			addr := proto.NewTCPAddrFromString(ap.String())
 			if cErr := r.cm.Connect(r.ctx, addr); cErr != nil {
-				zap.S().Debugf("Failed to establish outbound connection: %v", cErr)
+				zap.S().Debugf("[RSP] Failed to establish outbound connection: %v", cErr)
 				if urErr := r.reg.UnregisterPeer(ap.Addr()); urErr != nil {
 					zap.S().Warnf("Failed to unregister peer on connection failure: %v", urErr)
 					return

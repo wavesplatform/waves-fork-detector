@@ -90,7 +90,7 @@ func (l *Loader) Shutdown() {
 }
 
 func (l *Loader) OK() {
-	if l.pl != nil && l.pl.sm.MustState() == stageIdle {
+	if l.pl != nil && l.pl.sm.MustState() == stateIdle {
 		// Check score again and continue sync if needed.
 		p, err := l.registry.Peer(l.pl.peer.ID())
 		if err != nil {
@@ -113,8 +113,8 @@ func (l *Loader) OK() {
 }
 
 func (l *Loader) Fail() {
-	if l.pl != nil && l.pl.sm.MustState() == stageDone {
-		zap.S().Warnf("[LDR] Peer '%s' failed to load history", l.pl.peer.ID())
+	if l.pl != nil && l.pl.sm.MustState() == stateDone {
+		zap.S().Debugf("[LDR] Peer '%s' failed to load history", l.pl.peer.ID())
 		l.pl = nil
 	}
 }
@@ -152,7 +152,7 @@ func (l *Loader) sync() {
 	// Get lagging connected peers.
 	connections, err := l.registry.Connections()
 	if err != nil {
-		zap.S().Errorf("[LDR] Failed to get connections: %v", err)
+		zap.S().Warnf("Failed to get connections: %v", err)
 		return // Failed to get connections, try again later.
 	}
 	if len(connections) == 0 {
@@ -184,14 +184,14 @@ func (l *Loader) sync() {
 	// Select random lagging peer and start synchronization with it.
 	p := lagging[rand2.IntN(len(lagging))]
 	l.pl = newPeerLoader(&p, l.linkage, l)
-	zap.S().Infof("[LDR] Start loading history for peer '%s'", p.ID())
+	zap.S().Infof("Start loading history for peer '%s'", p.ID())
 	l.continueSync()
 }
 
 func (l *Loader) continueSync() {
 	l.ticker.Reset(tickerInterval) // Start ticker.
 	if err := l.pl.start(); err != nil {
-		zap.S().Warnf("[LDR] Failed to syncronize with peer '%s': %v", l.pl.peer.ID(), err)
+		zap.S().Warnf("Failed to syncronize with peer '%s': %v", l.pl.peer.ID(), err)
 	}
 }
 
@@ -200,7 +200,7 @@ func (l *Loader) tick() {
 		return
 	}
 	if err := l.pl.processTick(time.Now()); err != nil {
-		zap.S().Warnf("[LDR] Failed to process tick on peer '%s': %v", l.pl.peer.ID(), err)
+		zap.S().Warnf("Failed to process tick on peer '%s': %v", l.pl.peer.ID(), err)
 	}
 }
 
@@ -215,7 +215,7 @@ func (l *Loader) handleIDs(p IDsPackage) {
 		return // Ignore IDs from unexpected peers.
 	}
 	if err := l.pl.processIDs(p.IDs); err != nil {
-		zap.S().Warnf("[LDR] Failed to process IDs for peer '%s': %v", p.Peer.String(), err)
+		zap.S().Warnf("Failed to process IDs for peer '%s': %v", p.Peer.String(), err)
 	}
 }
 
@@ -227,6 +227,6 @@ func (l *Loader) handleBlock(p BlockPackage) {
 		return // Ignore blocks from unexpected peers.
 	}
 	if err := l.pl.processBlock(p.Block); err != nil {
-		zap.S().Warnf("[LDR] Failed to process block for peer '%s': %v", p.Peer.String(), err)
+		zap.S().Warnf("Failed to process block for peer '%s': %v", p.Peer.String(), err)
 	}
 }

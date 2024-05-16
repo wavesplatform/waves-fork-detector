@@ -68,7 +68,7 @@ func NewConnectionManager(
 }
 
 func (h *ConnectionManager) Accept(ctx context.Context, conn net.Conn) error {
-	zap.S().Debugf("New incoming connection from %s", conn.RemoteAddr())
+	zap.S().Debugf("[CON] New incoming connection from %s", conn.RemoteAddr())
 
 	ap, err := netip.ParseAddrPort(conn.RemoteAddr().String())
 	if err != nil {
@@ -93,7 +93,7 @@ func (h *ConnectionManager) Accept(ctx context.Context, conn net.Conn) error {
 }
 
 func (h *ConnectionManager) Connect(ctx context.Context, addr proto.TCPAddr) error {
-	zap.S().Debugf("New outgoing connection to %s", addr)
+	zap.S().Debugf("[CON] New outgoing connection to %s", addr)
 	params := outgoing.EstablishParams{
 		Address:      addr,
 		WavesNetwork: h.network,

@@ -256,7 +256,7 @@ func (l *Linkage) LogInitialStats() {
 			zap.S().Errorf("Failed to get block: %v", blErr)
 			return
 		}
-		zap.S().Infof("Head #%d '%s' at height %d", head.ID, head.BlockID.String(), b.Height)
+		zap.S().Infof("\tHead '%s' at height %d", head.BlockID.String(), b.Height)
 	}
 	leashes, err := l.st.leashes()
 	if err != nil {
@@ -265,7 +265,7 @@ func (l *Linkage) LogInitialStats() {
 	}
 	zap.S().Infof("Leashes count in storage: %d", len(leashes))
 	for _, lsh := range leashes {
-		zap.S().Infof("Peer '%s' on block '%s'", lsh.Addr.String(), lsh.BlockID.String())
+		zap.S().Infof("\tPeer '%s' on block '%s'", lsh.Addr.String(), lsh.BlockID.String())
 	}
 }
 

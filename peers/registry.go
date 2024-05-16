@@ -235,16 +235,16 @@ func (r *Registry) AppendAddresses(addresses []*net.TCPAddr) int {
 			continue
 		}
 		if ap.Addr().IsLoopback() {
-			zap.S().Debugf("Skipping loopback address: %s", ap.String())
+			zap.S().Debugf("[REG] Skipping loopback address: %s", ap.String())
 			continue
 		}
 		if ap.Addr().Compare(r.declared) == 0 {
-			zap.S().Debugf("Skipping self address: %s", ap.String())
+			zap.S().Debugf("[REG] Skipping self address: %s", ap.String())
 			continue
 		}
 		yes, err := r.storage.hasPeer(ap.Addr())
 		if err != nil {
-			zap.S().Debugf("Failed to append addresses: %v", err)
+			zap.S().Debugf("[REG] Failed to append addresses: %v", err)
 			return count
 		}
 		if !yes {
@@ -322,7 +322,7 @@ func (r *Registry) TakeAvailableAddresses() ([]netip.AddrPort, error) {
 	if err != nil {
 		return addresses, fmt.Errorf("failed to get available addresses from storage: %w", err)
 	}
-	zap.S().Debugf("Getting available addresses: pending %d, connected %d", len(r.pending), len(r.connections))
+	zap.S().Debugf("[REG] Getting available addresses: pending %d, connected %d", len(r.pending), len(r.connections))
 	for _, p := range peers {
 		if p.State == PeerHostile {
 			continue

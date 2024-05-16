@@ -19,26 +19,6 @@ const (
 	timeoutDuration = 30 * time.Second
 )
 
-type stage int
-
-const (
-	stageIdle stage = iota
-	stageWaitingForIDs
-	stageWaitingForBlocks
-	stageDone
-)
-
-type event int
-
-const (
-	eventStart event = iota
-	eventIDs
-	eventBlock
-	eventTick
-	eventTimeout
-	eventQueueReady
-)
-
 type peerLoader struct {
 	sm *stateless.StateMachine
 
@@ -52,7 +32,7 @@ type peerLoader struct {
 
 func newPeerLoader(peer peers.HistoryRequester, hp chains.HistoryProvider, r Reporter) *peerLoader {
 	pl := &peerLoader{
-		sm:   stateless.NewStateMachine(stageIdle),
+		sm:   stateless.NewStateMachine(stateIdle),
 		peer: peer,
 		hp:   hp,
 		r:    r,
@@ -70,9 +50,9 @@ func newPeerLoader(peer peers.HistoryRequester, hp chains.HistoryProvider, r Rep
 }
 
 func (pl *peerLoader) configureIdleState() {
-	pl.sm.Configure(stageIdle).
+	pl.sm.Configure(stateIdle).
 		OnEntryFrom(eventQueueReady, pl.reportOK).
-		Permit(eventStart, stageWaitingForIDs).
+		Permit(eventStart, stateWaitingForIDs).
 		Ignore(eventIDs).
 		Ignore(eventBlock).
 		Ignore(eventTick).
@@ -81,29 +61,29 @@ func (pl *peerLoader) configureIdleState() {
 }
 
 func (pl *peerLoader) configureWaitingForIDs() {
-	pl.sm.Configure(stageWaitingForIDs).
+	pl.sm.Configure(stateWaitingForIDs).
 		OnEntryFrom(eventStart, pl.requestIDs).
-		Permit(eventIDs, stageWaitingForBlocks).
+		Permit(eventIDs, stateWaitingForBlocks).
 		InternalTransition(eventTick, pl.onTick).
-		Permit(eventTimeout, stageDone).
+		Permit(eventTimeout, stateDone).
 		Ignore(eventStart).
 		Ignore(eventBlock).
 		Ignore(eventQueueReady)
 }
 
 func (pl *peerLoader) configureWaitingForBlocksState() {
-	pl.sm.Configure(stageWaitingForBlocks).
+	pl.sm.Configure(stateWaitingForBlocks).
 		OnEntryFrom(eventIDs, pl.requestBlocks).
 		InternalTransition(eventBlock, pl.appendBlock).
 		InternalTransition(eventTick, pl.onTick).
-		Permit(eventTimeout, stageDone).
-		Permit(eventQueueReady, stageIdle).
+		Permit(eventTimeout, stateDone).
+		Permit(eventQueueReady, stateIdle).
 		Ignore(eventStart).
 		Ignore(eventIDs)
 }
 
 func (pl *peerLoader) configureDoneState() {
-	pl.sm.Configure(stageDone).
+	pl.sm.Configure(stateDone).
 		OnEntry(pl.handleFailure).
 		Ignore(eventStart).
 		Ignore(eventIDs).
@@ -150,7 +130,7 @@ func (pl *peerLoader) onTick(_ context.Context, args ...any) error {
 		return fmt.Errorf("failed to process tick for peer '%s': invalid argument type", pl.peer.ID())
 	}
 	if d := tm.Sub(pl.timestamp); d > timeoutDuration {
-		zap.S().Warnf("[PL@%s] Timeout (%s) in state %s", pl.peer.ID(), d, pl.sm.MustState())
+		zap.S().Debugf("[PL@%s] Timeout (%s) in state %s", pl.peer.ID(), d, pl.sm.MustState())
 		return pl.sm.Fire(eventTimeout)
 	}
 	return nil
@@ -202,7 +182,7 @@ func (pl *peerLoader) requestBlocks(_ context.Context, args ...any) error {
 	}
 
 	pl.queue = newQueue(req)
-	zap.S().Infof("[PL@%s] Requesting blocks for %s", pl.peer.ID(), pl.queue.rangeString())
+	zap.S().Infof("Requesting blocks %s from peer '%s'", pl.queue.rangeString(), pl.peer.ID())
 	for _, id := range req {
 		pl.peer.RequestBlock(id)
 	}
@@ -223,7 +203,7 @@ func (pl *peerLoader) appendBlock(_ context.Context, args ...any) error {
 					it.received.BlockID(), pl.peer.ID(), err)
 			}
 		}
-		zap.S().Debugf("Peer '%s' loaded blocks %s", pl.peer.ID(), pl.queue.rangeString())
+		zap.S().Debugf("[PL@%s] Blocks %s loaded", pl.peer.ID(), pl.queue.rangeString())
 		return pl.sm.Fire(eventQueueReady)
 	}
 	return nil

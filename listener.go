@@ -29,7 +29,7 @@ func NewListener(bind, declared proto.TCPAddr, cm *ConnectionManager) Service {
 	}
 	if bind.Empty() && bind.Port == 0 {
 		zap.S().Warn("Bind address is empty")
-		zap.S().Info("No network server will be started")
+		zap.S().Warn("No network server will be started")
 		return &EmptyService{}
 	}
 	zap.S().Infof("Starting network server on '%s'", bind.String())
@@ -80,7 +80,7 @@ func (l *Listener) run() error {
 			}
 			go func() {
 				if aErr := l.cm.Accept(l.ctx, conn); aErr != nil {
-					zap.S().Debugf("Failed to accept incoming connection from '%s': %v",
+					zap.S().Debugf("[LSN] Failed to accept incoming connection from '%s': %v",
 						conn.RemoteAddr().String(), aErr)
 					return
 				}
