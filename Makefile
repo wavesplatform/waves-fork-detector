@@ -60,7 +60,7 @@ build-darwin-arm64:
 build-windows-amd64:
 	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o build/bin/windows-amd64/forkdetector.exe -ldflags="main.version=$(VERSION)" .
 
-release: ver build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-windows-amd64
+release: ver build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 build-windows-amd64
 
 dist: clean release
 	@mkdir -p build/dist
