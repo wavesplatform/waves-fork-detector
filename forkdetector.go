@@ -82,7 +82,7 @@ func run() error {
 	}
 	api.Run(ctx)
 
-	parent := peer.NewParent(false)
+	parent := peer.NewParent(true)
 	connManger := NewConnectionManager(p.scheme, p.name, p.nonce, p.declaredAddress, reg, parent)
 
 	listener := NewListener(p.netBind, p.declaredAddress, connManger)

@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"net/netip"
 	"runtime"
+	"sort"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/wavesplatform/gowaves/pkg/proto"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -65,6 +67,31 @@ type HeadInfo struct {
 	Height    uint32    `json:"height"`
 	Score     *big.Int  `json:"score"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+type LeashInfo struct {
+	BlockID    string    `json:"block_id"`
+	Height     uint32    `json:"height"`
+	Score      *big.Int  `json:"score"`
+	Timestamp  time.Time `json:"timestamp"`
+	PeersCount int       `json:"peers_count"`
+	Peers      []string  `json:"peers"`
+}
+
+type ByScore []LeashInfo
+
+func (a ByScore) Len() int {
+	return len(a)
+}
+
+func (a ByScore) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+
+func (a ByScore) Less(i, j int) bool {
+	x := a[i].Score
+	y := a[j].Score
+	return x.Cmp(y) < 0
 }
 
 type API struct {
@@ -133,6 +160,7 @@ func (a *API) routes() chi.Router {
 	r.Get("/peers/friendly", a.friendly) // Returns the list of peers that have been successfully connected at least once
 	r.Get("/connections", a.connections) // Returns the list of active connections
 	r.Get("/heads", a.heads)             // Returns the combined info about heads for all connected peers
+	r.Get("/leashes", a.leashes)         // Returns the list of all known leashes grouped by block IDs.
 
 	r.Get("/status", a.status)       // Status information
 	r.Get("/forks", a.forks)         // Returns the combined info about forks for all connected peers
@@ -215,7 +243,7 @@ func (a *API) connections(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *API) heads(w http.ResponseWriter, _ *http.Request) {
-	heads, err := a.linkage.Heads()
+	heads, err := a.linkage.ActiveHeads()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
@@ -238,6 +266,41 @@ func (a *API) heads(w http.ResponseWriter, _ *http.Request) {
 	err = json.NewEncoder(w).Encode(infos)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal heads to JSON: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
+	leashes, err := a.linkage.Leashes()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	m := make(map[proto.BlockID][]string)
+	for _, l := range leashes {
+		m[l.BlockID] = append(m[l.BlockID], l.Addr.String())
+	}
+	r := make([]LeashInfo, 0, len(m))
+	for k, v := range m {
+		b, blErr := a.linkage.Block(k)
+		if blErr != nil {
+			http.Error(w, fmt.Sprintf("Failed to complete request: %v", blErr), http.StatusInternalServerError)
+			return
+		}
+		li := LeashInfo{
+			BlockID:    b.ID.String(),
+			Height:     b.Height,
+			Score:      b.Score,
+			Timestamp:  time.UnixMilli(int64(b.Timestamp)),
+			PeersCount: len(v),
+			Peers:      v,
+		}
+		r = append(r, li)
+	}
+	sort.Sort(sort.Reverse(ByScore(r)))
+	err = json.NewEncoder(w).Encode(r)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal leashes to JSON: %v", err), http.StatusInternalServerError)
 		return
 	}
 }

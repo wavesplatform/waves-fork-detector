@@ -42,7 +42,7 @@ func NewConnectionManager(
 		proto.ContentIDBlock:                     false,
 		proto.ContentIDScore:                     false,
 		proto.ContentIDTransaction:               true,
-		proto.ContentIDInvMicroblock:             true,
+		proto.ContentIDInvMicroblock:             false,
 		proto.ContentIDCheckpoint:                true,
 		proto.ContentIDMicroblockRequest:         true,
 		proto.ContentIDMicroblock:                true,

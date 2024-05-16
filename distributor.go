@@ -142,22 +142,22 @@ func (d *Distributor) handleInternalError(peer peer.Peer, ie *peer.InternalErr) 
 
 func (d *Distributor) handleMessage(msg peer.ProtoMessage) {
 	switch v := msg.Message.(type) {
-	case *proto.ScoreMessage:
-		d.handleScoreMessage(msg.ID, v.Score)
-	case *proto.BlockMessage:
-		d.handleBlockMessage(msg.ID, v)
-	case *proto.PBBlockMessage:
-		d.handleProtoBlockMessage(msg.ID, v)
-	case *proto.PeersMessage:
-		d.handlePeersMessage(v)
 	case *proto.GetPeersMessage:
 		d.handleGetPeersMessage(msg.ID)
+	case *proto.PeersMessage:
+		d.handlePeersMessage(v)
 	case *proto.SignaturesMessage:
 		d.handleSignaturesMessage(msg.ID, v.Signatures)
-	case *proto.BlockIdsMessage:
-		d.handleBlockIDsMessage(msg.ID, v.Blocks)
+	case *proto.BlockMessage:
+		d.handleBlockMessage(msg.ID, v)
+	case *proto.ScoreMessage:
+		d.handleScoreMessage(msg.ID, v.Score)
 	case *proto.MicroBlockInvMessage:
 		d.handleMicroBlockInvMessage(msg.ID, v)
+	case *proto.PBBlockMessage:
+		d.handleProtoBlockMessage(msg.ID, v)
+	case *proto.BlockIdsMessage:
+		d.handleBlockIDsMessage(msg.ID, v.Blocks)
 	}
 }
 

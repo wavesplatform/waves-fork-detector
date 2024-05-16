@@ -26,6 +26,11 @@ func (h *Head) String() string {
 	return fmt.Sprintf("(%d)'%s'", h.ID, h.BlockID.String())
 }
 
+type Leash struct {
+	Addr    netip.Addr
+	BlockID proto.BlockID
+}
+
 type Stats struct {
 	Blocks int
 	Short  int

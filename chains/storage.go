@@ -347,13 +347,13 @@ func (s *storage) updateLeash(addr netip.Addr, id proto.BlockID) error {
 	return nil
 }
 
-func (s *storage) leashes() ([]netip.Addr, error) {
+func (s *storage) leashes() ([]Leash, error) {
 	sn, err := s.db.GetSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get leashes: %w", err)
 	}
 	defer sn.Release()
-	r := make([]netip.Addr, 0)
+	r := make([]Leash, 0)
 	rng := &util.Range{
 		Start: addrKeyBytes(netip.AddrFrom4([...]byte{0x00, 0x00, 0x00, 0x00})),
 		Limit: addrKeyBytes(netip.AddrFrom16([...]byte{
@@ -364,7 +364,11 @@ func (s *storage) leashes() ([]netip.Addr, error) {
 	defer it.Release()
 	for it.First(); it.Valid(); it.Next() {
 		addr := addrKeyFromBytes(it.Key())
-		r = append(r, addr)
+		id, idErr := proto.NewBlockIDFromBytes(it.Value())
+		if idErr != nil {
+			return nil, fmt.Errorf("failed to get leashes: %w", idErr)
+		}
+		r = append(r, Leash{Addr: addr, BlockID: id})
 	}
 	return r, nil
 }

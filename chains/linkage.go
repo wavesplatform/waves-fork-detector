@@ -146,9 +146,14 @@ func (l *Linkage) BlockScore(id proto.BlockID) (*proto.Score, error) {
 	return bl.Score, nil
 }
 
-// Heads returns list of all chains heads sorted by score descendant order.
+// Heads returns list of all chains heads.
 func (l *Linkage) Heads() ([]Head, error) {
 	return l.st.heads()
+}
+
+// ActiveHeads returns list of heads pointed by peers.
+func (l *Linkage) ActiveHeads() ([]Head, error) {
+	return l.activeHeads()
 }
 
 func (l *Linkage) LastIDs(id proto.BlockID, count int) ([]proto.BlockID, error) {
@@ -193,8 +198,34 @@ func (l *Linkage) MoveLeash(id proto.BlockID, addr netip.Addr) error {
 	return l.st.updateLeash(addr, id)
 }
 
-func (l *Linkage) LogInitialStats() {
+func (l *Linkage) activeHeads() ([]Head, error) {
 	heads, err := l.st.heads()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active leashes: %w", err)
+	}
+	leashes, err := l.st.leashes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active leashes: %w", err)
+	}
+	leashed := make(map[proto.BlockID]struct{})
+	for _, lsh := range leashes {
+		leashed[lsh.BlockID] = struct{}{}
+	}
+	r := make([]Head, 0, len(heads))
+	for _, h := range heads {
+		if _, ok := leashed[h.BlockID]; ok {
+			r = append(r, h)
+		}
+	}
+	return r, nil
+}
+
+func (l *Linkage) Leashes() ([]Leash, error) {
+	return l.st.leashes()
+}
+
+func (l *Linkage) LogInitialStats() {
+	heads, err := l.activeHeads()
 	if err != nil {
 		zap.S().Errorf("Failed to log statistics: %v", err)
 		return
@@ -214,13 +245,8 @@ func (l *Linkage) LogInitialStats() {
 		return
 	}
 	zap.S().Infof("Leashes count in storage: %d", len(leashes))
-	for _, addr := range leashes {
-		id, lshErr := l.Leash(addr)
-		if lshErr != nil {
-			zap.S().Errorf("Failed to log statistics: %v", lshErr)
-			return
-		}
-		zap.S().Infof("Peer '%s' on block '%s'", addr.String(), id.String())
+	for _, lsh := range leashes {
+		zap.S().Infof("Peer '%s' on block '%s'", lsh.Addr.String(), lsh.BlockID.String())
 	}
 }
 

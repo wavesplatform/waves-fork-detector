@@ -78,7 +78,7 @@ func (l *Loader) Run(ctx context.Context) {
 	l.wait = g.Wait
 
 	g.Go(l.loop)
-	l.sync()
+	l.timer.Reset(timerInterval)
 }
 
 func (l *Loader) Shutdown() {
@@ -91,14 +91,31 @@ func (l *Loader) Shutdown() {
 
 func (l *Loader) OK() {
 	if l.pl != nil && l.pl.sm.MustState() == stageIdle {
-		l.continueSync()
+		// Check score again and continue sync if needed.
+		p, err := l.registry.Peer(l.pl.peer.ID())
+		if err != nil {
+			zap.S().Warnf("Failed to get connection: %v", err)
+			return
+		}
+		score, err := l.linkage.LeashScore(l.pl.peer.ID())
+		if err != nil {
+			zap.S().Warnf("Failed to get peers score: %v", err)
+			return
+		}
+		if p.Score.Cmp(score) > 0 {
+			zap.S().Debugf("[LDR] Peer '%s' is still lagging, continue loading", l.pl.peer.ID())
+			l.continueSync()
+		} else {
+			zap.S().Debugf("[LDR] Peer '%s' is not lagging anymore, resetting loading peer", l.pl.peer.ID())
+			l.pl = nil
+		}
 	}
 }
 
 func (l *Loader) Fail() {
 	if l.pl != nil && l.pl.sm.MustState() == stageDone {
+		zap.S().Warnf("[LDR] Peer '%s' failed to load history", l.pl.peer.ID())
 		l.pl = nil
-		l.timer.Reset(timerInterval)
 	}
 }
 
@@ -118,9 +135,11 @@ func (l *Loader) loop() error {
 		case <-l.ticker.C:
 			l.ticker.Stop()
 			l.tick()
+			l.ticker.Reset(tickerInterval)
 		case <-l.timer.C:
 			l.timer.Stop()
 			l.sync()
+			l.timer.Reset(timerInterval)
 		}
 	}
 }
@@ -134,12 +153,10 @@ func (l *Loader) sync() {
 	connections, err := l.registry.Connections()
 	if err != nil {
 		zap.S().Errorf("[LDR] Failed to get connections: %v", err)
-		l.timer.Reset(timerInterval)
 		return // Failed to get connections, try again later.
 	}
 	if len(connections) == 0 {
 		zap.S().Debug("[LDR] No connected peers")
-		l.timer.Reset(timerInterval)
 		return // No connections, try again later.
 	}
 	zap.S().Debugf("[LDR] Trying to sync with %d connections", len(connections))
@@ -162,12 +179,12 @@ func (l *Loader) sync() {
 	}
 	if len(lagging) == 0 {
 		zap.S().Debug("[LDR] No peers to sync with")
-		l.timer.Reset(timerInterval)
 		return
 	}
 	// Select random lagging peer and start synchronization with it.
 	p := lagging[rand2.IntN(len(lagging))]
 	l.pl = newPeerLoader(&p, l.linkage, l)
+	zap.S().Infof("[LDR] Start loading history for peer '%s'", p.ID())
 	l.continueSync()
 }
 
@@ -185,7 +202,6 @@ func (l *Loader) tick() {
 	if err := l.pl.processTick(time.Now()); err != nil {
 		zap.S().Warnf("[LDR] Failed to process tick on peer '%s': %v", l.pl.peer.ID(), err)
 	}
-	l.ticker.Reset(tickerInterval)
 }
 
 func (l *Loader) handleIDs(p IDsPackage) {
