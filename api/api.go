@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"compress/flate"
@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/http"
 	"net/netip"
 	"runtime"
@@ -49,49 +48,6 @@ func Logger(l *zap.Logger) func(next http.Handler) http.Handler {
 		}
 		return http.HandlerFunc(fn)
 	}
-}
-
-type status struct {
-	ShortForksCount     int `json:"short_forks_count"`
-	LongForksCount      int `json:"long_forks_count"`
-	AllPeersCount       int `json:"all_peers_count"`
-	FriendlyPeersCount  int `json:"friendly_peers_count"`
-	ConnectedPeersCount int `json:"connected_peers_count"`
-	TotalBlocksCount    int `json:"total_blocks_count"`
-	GoroutinesCount     int `json:"goroutines_count"`
-}
-
-type HeadInfo struct {
-	Number    uint64    `json:"number"`
-	ID        string    `json:"id"`
-	Height    uint32    `json:"height"`
-	Score     *big.Int  `json:"score"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-type LeashInfo struct {
-	BlockID    string    `json:"block_id"`
-	Height     uint32    `json:"height"`
-	Score      *big.Int  `json:"score"`
-	Timestamp  time.Time `json:"timestamp"`
-	PeersCount int       `json:"peers_count"`
-	Peers      []string  `json:"peers"`
-}
-
-type ByScore []LeashInfo
-
-func (a ByScore) Len() int {
-	return len(a)
-}
-
-func (a ByScore) Swap(i, j int) {
-	a[i], a[j] = a[j], a[i]
-}
-
-func (a ByScore) Less(i, j int) bool {
-	x := a[i].Score
-	y := a[j].Score
-	return x.Cmp(y) < 0
 }
 
 type API struct {
@@ -248,14 +204,14 @@ func (a *API) heads(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
 	}
-	infos := make([]HeadInfo, len(heads))
+	infos := make([]headInfo, len(heads))
 	for i, h := range heads {
 		b, blErr := a.linkage.Block(h.BlockID)
 		if blErr != nil {
 			http.Error(w, fmt.Sprintf("Failed to complete request: %v", blErr), http.StatusInternalServerError)
 			return
 		}
-		infos[i] = HeadInfo{
+		infos[i] = headInfo{
 			Number:    h.ID,
 			ID:        h.BlockID.String(),
 			Height:    b.Height,
@@ -280,14 +236,14 @@ func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
 	for _, l := range leashes {
 		m[l.BlockID] = append(m[l.BlockID], l.Addr.String())
 	}
-	r := make([]LeashInfo, 0, len(m))
+	r := make([]leashInfo, 0, len(m))
 	for k, v := range m {
 		b, blErr := a.linkage.Block(k)
 		if blErr != nil {
 			http.Error(w, fmt.Sprintf("Failed to complete request: %v", blErr), http.StatusInternalServerError)
 			return
 		}
-		li := LeashInfo{
+		li := leashInfo{
 			BlockID:    b.ID.String(),
 			Height:     b.Height,
 			Score:      b.Score,
@@ -297,7 +253,7 @@ func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
 		}
 		r = append(r, li)
 	}
-	sort.Sort(sort.Reverse(ByScore(r)))
+	sort.Sort(byScoreAndPeersDesc(r))
 	err = json.NewEncoder(w).Encode(r)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal leashes to JSON: %v", err), http.StatusInternalServerError)

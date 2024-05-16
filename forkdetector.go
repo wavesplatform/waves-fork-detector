@@ -14,6 +14,7 @@ import (
 	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
 
+	"github.com/alexeykiselev/waves-fork-detector/api"
 	"github.com/alexeykiselev/waves-fork-detector/chains"
 	"github.com/alexeykiselev/waves-fork-detector/loading"
 	"github.com/alexeykiselev/waves-fork-detector/peers"
@@ -76,11 +77,11 @@ func run() error {
 
 	linkage.LogInitialStats()
 
-	api, err := NewAPI(reg, linkage, p.apiBind)
+	a, err := api.NewAPI(reg, linkage, p.apiBind)
 	if err != nil {
 		return fmt.Errorf("failed to create API server: %w", err)
 	}
-	api.Run(ctx)
+	a.Run(ctx)
 
 	parent := peer.NewParent(true)
 	connManger := NewConnectionManager(p.scheme, p.name, p.nonce, p.declaredAddress, reg, parent)
@@ -100,7 +101,7 @@ func run() error {
 	<-ctx.Done()
 	zap.S().Info("User termination in progress...")
 
-	api.Shutdown()
+	a.Shutdown()
 	listener.Shutdown()
 	respawn.Shutdown()
 	loader.Shutdown()
