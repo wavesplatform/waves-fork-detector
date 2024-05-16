@@ -41,7 +41,7 @@ func run() error {
 		return err
 	}
 
-	logger := logging.SetupLogger(p.logLevel, logging.NetworkDataFilter(false))
+	logger := logging.SetupLogger(p.logLevel, logging.NetworkDataFilter(false), logging.NetworkFilter(false))
 	defer func() {
 		if syncErr := logger.Sync(); syncErr != nil && errors.Is(err, os.ErrInvalid) {
 			panic(fmt.Sprintf("Failed to close logging subsystem: %v\n", syncErr))

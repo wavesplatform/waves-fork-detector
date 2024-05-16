@@ -3,11 +3,19 @@ package chains
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"net/netip"
+	"slices"
+	"sort"
+	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 	"go.uber.org/zap"
+)
+
+const (
+	longForkThreshold = 5
 )
 
 var (
@@ -108,6 +116,17 @@ func (l *Linkage) PutMicroBlock(inv *proto.MicroBlockInv, addr netip.Addr) error
 		return ulErr
 	}
 	return nil
+}
+
+func (l *Linkage) HasLeash(addr netip.Addr) (bool, error) {
+	_, err := l.st.leash(addr)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // Leash return the block ID the peer is leashed to. For an unleashed peer the genesis block ID is returned.
@@ -250,18 +269,132 @@ func (l *Linkage) LogInitialStats() {
 	}
 }
 
-func (l *Linkage) Stats() Stats {
-	return Stats{}
+func (l *Linkage) Stats() (Stats, error) {
+	forks, err := l.Forks()
+	if err != nil {
+		return Stats{}, fmt.Errorf("failed to get stats: %w", err)
+	}
+	r := Stats{Short: 0, Long: 0}
+	for _, f := range forks {
+		if f.Length > longForkThreshold {
+			r.Long++
+		} else {
+			r.Short++
+		}
+	}
+	return r, nil
 }
 
-func (l *Linkage) Forks(addresses []netip.Addr) ([]Fork, error) {
-	_ = addresses
-	return nil, nil
+func (l *Linkage) Forks() ([]Fork, error) {
+	leashes, err := l.st.leashes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get forks: %w", err)
+	}
+	m := make(map[proto.BlockID][]netip.Addr)
+	for _, lsh := range leashes {
+		m[lsh.BlockID] = append(m[lsh.BlockID], lsh.Addr)
+	}
+	r := make([]Fork, 0, len(m))
+	for k, v := range m {
+		b, blErr := l.Block(k)
+		if blErr != nil {
+			return nil, fmt.Errorf("failed to get forks: %w", blErr)
+		}
+		frk := Fork{
+			Longest:         false,
+			HeadBlock:       b.ID,
+			HeadTimestamp:   time.UnixMilli(int64(b.Timestamp)),
+			HeadGenerator:   b.Generator,
+			HeadHeight:      b.Height,
+			Score:           b.Score,
+			Peers:           v,
+			LastCommonBlock: b.ID,
+			Length:          int(b.Height), // Initially length of the fork is the height of the head block.
+		}
+		r = append(r, frk)
+	}
+	sort.Sort(byScoreAndPeersDesc(r))
+
+	longest := r[0]
+	r[0].Longest = true
+
+	for i := range r {
+		lcaID, lcaErr := l.st.lca(longest.HeadBlock, r[i].HeadBlock)
+		if lcaErr != nil {
+			return nil, fmt.Errorf("failed to get forks: %w", lcaErr)
+		}
+		r[i].LastCommonBlock = lcaID // Set last common block ID.
+		lcaBlock, blErr := l.st.block(lcaID)
+		if blErr != nil {
+			return nil, fmt.Errorf("failed to get forks: %w", blErr)
+		}
+		r[i].Length -= int(lcaBlock.Height) // Update length of the fork.
+	}
+
+	return r, nil
 }
 
-func (l *Linkage) Fork(peer netip.Addr) ([]Fork, error) {
-	_ = peer
-	return nil, nil
+func (l *Linkage) Fork(peer netip.Addr) (Fork, error) {
+	leashes, err := l.st.leashes()
+	if err != nil {
+		return Fork{}, fmt.Errorf("failed to get fork of '%s': %w", peer.String(), err)
+	}
+	m := make(map[proto.BlockID][]netip.Addr)
+	for _, lsh := range leashes {
+		m[lsh.BlockID] = append(m[lsh.BlockID], lsh.Addr)
+	}
+	score := big.NewInt(0)
+	peers := 0
+	var longest proto.BlockID
+	var fork Fork
+	for k, v := range m {
+		b, blErr := l.Block(k)
+		if blErr != nil {
+			return Fork{}, fmt.Errorf("failed to get fork of '%s': %w", peer.String(), blErr)
+		}
+		switch score.Cmp(b.Score) {
+		case 0:
+			if len(v) > peers {
+				score = b.Score
+				peers = len(v)
+				longest = k
+			}
+		case -1:
+			score = b.Score
+			longest = k
+			peers = len(v)
+		}
+		if slices.Contains(v, peer) {
+			fork = Fork{
+				Longest:         false,
+				HeadBlock:       b.ID,
+				HeadTimestamp:   time.UnixMilli(int64(b.Timestamp)),
+				HeadGenerator:   b.Generator,
+				HeadHeight:      b.Height,
+				Score:           b.Score,
+				Peers:           v,
+				LastCommonBlock: b.ID,
+				Length:          int(b.Height), // Initially length of the fork is the height of the head block.
+			}
+		}
+	}
+	if fork.HeadBlock == longest { // Peer is on the longest fork.
+		fork.Longest = true
+		fork.Length = 0
+		return fork, nil
+	}
+	lcaID, lcaErr := l.st.lca(longest, fork.HeadBlock)
+	if lcaErr != nil {
+		return Fork{}, fmt.Errorf("failed to get fork of '%s': %w", peer.String(), lcaErr)
+	}
+	fork.LastCommonBlock = lcaID // Set last common block ID.
+	lcaBlock, blErr := l.st.block(lcaID)
+	if blErr != nil {
+		return Fork{}, fmt.Errorf("failed to get fork of '%s': %w", peer.String(), blErr)
+	}
+	fork.Length -= int(lcaBlock.Height) // Update length of the fork.
+
+	return fork, nil
 }
 
 func (l *Linkage) hasBlock(id proto.BlockID) (bool, error) {

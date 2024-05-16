@@ -58,14 +58,6 @@ type API struct {
 	srv      *http.Server
 }
 
-type PublicAddressInfo struct {
-	Address         string    `json:"address"`
-	Version         string    `json:"version"`
-	Status          string    `json:"status"`
-	Attempts        int       `json:"attempts"`
-	NextAttemptTime time.Time `json:"next_attempt_time"`
-}
-
 func NewAPI(registry *peers.Registry, linkage *chains.Linkage, bind string) (*API, error) {
 	if bind == "" {
 		return nil, errors.New("empty address to bin")
@@ -117,17 +109,19 @@ func (a *API) routes() chi.Router {
 	r.Get("/connections", a.connections) // Returns the list of active connections
 	r.Get("/heads", a.heads)             // Returns the combined info about heads for all connected peers
 	r.Get("/leashes", a.leashes)         // Returns the list of all known leashes grouped by block IDs.
-
-	r.Get("/status", a.status)       // Status information
-	r.Get("/forks", a.forks)         // Returns the combined info about forks for all connected peers
-	r.Get("/all-forks", a.allForks)  // Returns the combined info about all registered forks
-	r.Get("/fork/{address}", a.fork) // Returns the info about fork of the given peer
+	r.Get("/status", a.status)           // Status information
+	r.Get("/forks", a.forks)             // Returns the combined info about forks for all connected peers
+	r.Get("/fork/{address}", a.fork)     // Returns the info about fork of the given peer
 	return r
 }
 
 func (a *API) status(w http.ResponseWriter, _ *http.Request) {
 	goroutines := runtime.NumGoroutine()
-	stats := a.linkage.Stats()
+	stats, err := a.linkage.Stats()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
 	all, err := a.registry.Peers()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
@@ -149,7 +143,6 @@ func (a *API) status(w http.ResponseWriter, _ *http.Request) {
 		AllPeersCount:       len(all),
 		FriendlyPeersCount:  len(friends),
 		ConnectedPeersCount: len(connections),
-		TotalBlocksCount:    stats.Blocks,
 		GoroutinesCount:     goroutines,
 	}
 	err = json.NewEncoder(w).Encode(s)
@@ -248,6 +241,7 @@ func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
 			Height:     b.Height,
 			Score:      b.Score,
 			Timestamp:  time.UnixMilli(int64(b.Timestamp)),
+			Generator:  b.Generator,
 			PeersCount: len(v),
 			Peers:      v,
 		}
@@ -262,38 +256,7 @@ func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *API) forks(w http.ResponseWriter, _ *http.Request) {
-	nodes, err := a.registry.Connections()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
-		return
-	}
-	addresses := make([]netip.Addr, len(nodes))
-	for i, n := range nodes {
-		addresses[i] = n.AddressPort.Addr()
-	}
-	forks, err := a.linkage.Forks(addresses)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
-		return
-	}
-	err = json.NewEncoder(w).Encode(forks)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal status to JSON: %v", err), http.StatusInternalServerError)
-		return
-	}
-}
-
-func (a *API) allForks(w http.ResponseWriter, _ *http.Request) {
-	nodes, err := a.registry.Peers()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
-		return
-	}
-	addresses := make([]netip.Addr, len(nodes))
-	for i, n := range nodes {
-		addresses[i] = n.AddressPort.Addr()
-	}
-	forks, err := a.linkage.Forks(addresses)
+	forks, err := a.linkage.Forks()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
@@ -310,6 +273,15 @@ func (a *API) fork(w http.ResponseWriter, r *http.Request) {
 	peer, err := netip.ParseAddr(addr)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Invalid peer address '%s'", addr), http.StatusBadRequest)
+		return
+	}
+	ok, err := a.linkage.HasLeash(peer)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, fmt.Sprintf("Peer '%s' is unknown", addr), http.StatusNotFound)
 		return
 	}
 	fork, err := a.linkage.Fork(peer)

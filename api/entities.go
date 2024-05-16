@@ -3,6 +3,8 @@ package api
 import (
 	"math/big"
 	"time"
+
+	"github.com/wavesplatform/gowaves/pkg/proto"
 )
 
 type status struct {
@@ -11,7 +13,6 @@ type status struct {
 	AllPeersCount       int `json:"all_peers_count"`
 	FriendlyPeersCount  int `json:"friendly_peers_count"`
 	ConnectedPeersCount int `json:"connected_peers_count"`
-	TotalBlocksCount    int `json:"total_blocks_count"`
 	GoroutinesCount     int `json:"goroutines_count"`
 }
 
@@ -24,12 +25,13 @@ type headInfo struct {
 }
 
 type leashInfo struct {
-	BlockID    string    `json:"block_id"`
-	Height     uint32    `json:"height"`
-	Score      *big.Int  `json:"score"`
-	Timestamp  time.Time `json:"timestamp"`
-	PeersCount int       `json:"peers_count"`
-	Peers      []string  `json:"peers"`
+	BlockID    string             `json:"block_id"`
+	Height     uint32             `json:"height"`
+	Score      *big.Int           `json:"score"`
+	Timestamp  time.Time          `json:"timestamp"`
+	Generator  proto.WavesAddress `json:"generator"`
+	PeersCount int                `json:"peers_count"`
+	Peers      []string           `json:"peers"`
 }
 
 type byScoreAndPeersDesc []leashInfo
