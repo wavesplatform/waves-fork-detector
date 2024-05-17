@@ -51,7 +51,7 @@ func newParameters() (*parameters, error) {
 		"The network address presented to the network as a public address for connection.")
 	flagName := flag.String("name", "forkdetector",
 		"The name of the node visible to the network. Default value: \"forkdetector\".")
-	flagVersions := flag.String("versions", "1.5,1.4",
+	flagVersions := flag.String("versions", "1.5",
 		"Specify a comma-separated list of acceptable protocol versions. "+
 			"By default, the two most recent versions are accepted.")
 	flag.Parse()

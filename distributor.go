@@ -130,7 +130,7 @@ func (d *Distributor) handleInternalError(peer peer.Peer, ie *peer.InternalErr) 
 		zap.S().Warnf("Failed to parse address: %v", err)
 		return
 	}
-	zap.S().Infof("[DTR] Closing connection with peer %s", ap.String())
+	zap.S().Infof("[DTR] Closing connection with peer %s", ap.Addr().String())
 	zap.S().Debugf("[DTR] Peer %s failed with error: %v", ap, ie.Err)
 	if clErr := peer.Close(); clErr != nil {
 		zap.S().Warnf("Failed to close peer connection: %v", clErr)
@@ -171,7 +171,7 @@ func (d *Distributor) handleScoreMessage(peer peer.Peer, score []byte) {
 	zap.S().Debugf("[DTR] New score %s recevied from %s", s.String(), ap.Addr().String())
 	err = d.registry.UpdatePeerScore(ap.Addr(), s)
 	if err != nil {
-		zap.S().Debugf("[DTR] Failed to update score of peer '%s': %v", ap.String(), err)
+		zap.S().Debugf("[DTR] Failed to update score of peer '%s': %v", ap.Addr().String(), err)
 		return
 	}
 }
@@ -289,8 +289,9 @@ func (d *Distributor) handleMicroBlockInvMessage(peer peer.Peer, msg *proto.Micr
 		return
 	}
 	if putErr := d.linkage.PutMicroBlock(inv, ap.Addr()); putErr != nil {
-		zap.S().Warnf("Failed to append micro-block '%s': %v", inv.TotalBlockID.String(), putErr)
+		zap.S().Warnf("Failed to append micro-block '%s' received form '%s': %v",
+			inv.TotalBlockID.String(), ap.Addr().String(), putErr)
 		return
 	}
-	zap.S().Infof("Micro-block '%s' received from peer '%s'", inv.TotalBlockID.String(), ap.String())
+	zap.S().Infof("Micro-block '%s' received from peer '%s'", inv.TotalBlockID.String(), ap.Addr().String())
 }

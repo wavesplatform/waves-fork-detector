@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -39,6 +40,7 @@ type Linkage struct {
 	scheme  proto.Scheme
 	genesis proto.BlockID
 
+	mu *sync.RWMutex
 	st *storage
 }
 
@@ -53,6 +55,7 @@ func NewLinkage(path string, scheme proto.Scheme, genesis proto.Block) (*Linkage
 	return &Linkage{
 		scheme:  scheme,
 		genesis: genesis.BlockID(),
+		mu:      &sync.RWMutex{},
 		st:      st,
 	}, nil
 }
@@ -65,6 +68,9 @@ func (l *Linkage) Close() {
 }
 
 func (l *Linkage) PutBlock(block *proto.Block, addr netip.Addr) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	ok, err := l.st.hasBlock(block.BlockID())
 	if err != nil {
 		return err
@@ -92,6 +98,9 @@ func (l *Linkage) PutBlock(block *proto.Block, addr netip.Addr) error {
 }
 
 func (l *Linkage) PutMicroBlock(inv *proto.MicroBlockInv, addr netip.Addr) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	ok, err := l.st.hasBlock(inv.TotalBlockID)
 	if err != nil {
 		return err
@@ -119,6 +128,9 @@ func (l *Linkage) PutMicroBlock(inv *proto.MicroBlockInv, addr netip.Addr) error
 }
 
 func (l *Linkage) HasLeash(addr netip.Addr) (bool, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	_, err := l.st.leash(addr)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -131,6 +143,9 @@ func (l *Linkage) HasLeash(addr netip.Addr) (bool, error) {
 
 // Leash return the block ID the peer is leashed to. For an unleashed peer the genesis block ID is returned.
 func (l *Linkage) Leash(addr netip.Addr) (proto.BlockID, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	lsh, err := l.st.leash(addr)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -144,6 +159,9 @@ func (l *Linkage) Leash(addr netip.Addr) (proto.BlockID, error) {
 // LeashScore returns the score of the peer's leash. For an unleashed peer the score of genesis block is returned.
 // Error indicates a general storage failure.
 func (l *Linkage) LeashScore(addr netip.Addr) (*proto.Score, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	id, err := l.st.leash(addr)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -157,93 +175,61 @@ func (l *Linkage) LeashScore(addr netip.Addr) (*proto.Score, error) {
 	return bl.Score, nil
 }
 
-func (l *Linkage) BlockScore(id proto.BlockID) (*proto.Score, error) {
-	bl, err := l.st.block(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get block by ID '%s': %w", id.String(), err)
-	}
-	return bl.Score, nil
-}
-
 // Heads returns list of all chains heads.
 func (l *Linkage) Heads() ([]Head, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	return l.st.heads()
 }
 
 // ActiveHeads returns list of heads pointed by peers.
 func (l *Linkage) ActiveHeads() ([]Head, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	return l.activeHeads()
 }
 
 func (l *Linkage) LastIDs(id proto.BlockID, count int) ([]proto.BlockID, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	return l.st.getAncestors(id, count)
 }
 
 func (l *Linkage) HasBlock(id proto.BlockID) (bool, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	return l.hasBlock(id)
 }
 
 func (l *Linkage) Block(id proto.BlockID) (Block, error) {
-	b, err := l.st.block(id)
-	if err != nil {
-		return Block{}, err
-	}
-	bID, err := proto.NewBlockIDFromBytes(b.ID)
-	if err != nil {
-		return Block{}, fmt.Errorf("failed to get block: %w", err)
-	}
-	var pID proto.BlockID
-	if len(b.Parent) > 0 {
-		pID, err = proto.NewBlockIDFromBytes(b.Parent)
-		if err != nil {
-			return Block{}, fmt.Errorf("failed to get block: %w", err)
-		}
-	}
-	ga, err := proto.NewAddressFromBytes(b.Generator)
-	if err != nil {
-		return Block{}, fmt.Errorf("failed to get block: %w", err)
-	}
-	return Block{
-		ID:        bID,
-		Parent:    pID,
-		Height:    b.Height,
-		Generator: ga,
-		Score:     b.Score,
-		Timestamp: b.Timestamp,
-	}, nil
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	return l.block(id)
 }
 
 func (l *Linkage) MoveLeash(id proto.BlockID, addr netip.Addr) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	return l.st.updateLeash(addr, id)
 }
 
-func (l *Linkage) activeHeads() ([]Head, error) {
-	heads, err := l.st.heads()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active leashes: %w", err)
-	}
-	leashes, err := l.st.leashes()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active leashes: %w", err)
-	}
-	leashed := make(map[proto.BlockID]struct{})
-	for _, lsh := range leashes {
-		leashed[lsh.BlockID] = struct{}{}
-	}
-	r := make([]Head, 0, len(heads))
-	for _, h := range heads {
-		if _, ok := leashed[h.BlockID]; ok {
-			r = append(r, h)
-		}
-	}
-	return r, nil
-}
-
 func (l *Linkage) Leashes() ([]Leash, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	return l.st.leashes()
 }
 
 func (l *Linkage) LogInitialStats() {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	heads, err := l.activeHeads()
 	if err != nil {
 		zap.S().Errorf("Failed to log statistics: %v", err)
@@ -270,7 +256,10 @@ func (l *Linkage) LogInitialStats() {
 }
 
 func (l *Linkage) Stats() (Stats, error) {
-	forks, err := l.Forks()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	forks, err := l.forks()
 	if err != nil {
 		return Stats{}, fmt.Errorf("failed to get stats: %w", err)
 	}
@@ -286,55 +275,16 @@ func (l *Linkage) Stats() (Stats, error) {
 }
 
 func (l *Linkage) Forks() ([]Fork, error) {
-	leashes, err := l.st.leashes()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get forks: %w", err)
-	}
-	m := make(map[proto.BlockID][]netip.Addr)
-	for _, lsh := range leashes {
-		m[lsh.BlockID] = append(m[lsh.BlockID], lsh.Addr)
-	}
-	r := make([]Fork, 0, len(m))
-	for k, v := range m {
-		b, blErr := l.Block(k)
-		if blErr != nil {
-			return nil, fmt.Errorf("failed to get forks: %w", blErr)
-		}
-		frk := Fork{
-			Longest:         false,
-			HeadBlock:       b.ID,
-			HeadTimestamp:   time.UnixMilli(int64(b.Timestamp)),
-			HeadGenerator:   b.Generator,
-			HeadHeight:      b.Height,
-			Score:           b.Score,
-			Peers:           v,
-			LastCommonBlock: b.ID,
-			Length:          int(b.Height), // Initially length of the fork is the height of the head block.
-		}
-		r = append(r, frk)
-	}
-	sort.Sort(byScoreAndPeersDesc(r))
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
-	longest := r[0]
-	r[0].Longest = true
-
-	for i := range r {
-		lcaID, lcaErr := l.st.lca(longest.HeadBlock, r[i].HeadBlock)
-		if lcaErr != nil {
-			return nil, fmt.Errorf("failed to get forks: %w", lcaErr)
-		}
-		r[i].LastCommonBlock = lcaID // Set last common block ID.
-		lcaBlock, blErr := l.st.block(lcaID)
-		if blErr != nil {
-			return nil, fmt.Errorf("failed to get forks: %w", blErr)
-		}
-		r[i].Length -= int(lcaBlock.Height) // Update length of the fork.
-	}
-
-	return r, nil
+	return l.forks()
 }
 
 func (l *Linkage) Fork(peer netip.Addr) (Fork, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	leashes, err := l.st.leashes()
 	if err != nil {
 		return Fork{}, fmt.Errorf("failed to get fork of '%s': %w", peer.String(), err)
@@ -348,7 +298,7 @@ func (l *Linkage) Fork(peer netip.Addr) (Fork, error) {
 	var longest proto.BlockID
 	var fork Fork
 	for k, v := range m {
-		b, blErr := l.Block(k)
+		b, blErr := l.block(k)
 		if blErr != nil {
 			return Fork{}, fmt.Errorf("failed to get fork of '%s': %w", peer.String(), blErr)
 		}
@@ -397,6 +347,107 @@ func (l *Linkage) Fork(peer netip.Addr) (Fork, error) {
 	return fork, nil
 }
 
+func (l *Linkage) activeHeads() ([]Head, error) {
+	heads, err := l.st.heads()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active leashes: %w", err)
+	}
+	leashes, err := l.st.leashes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active leashes: %w", err)
+	}
+	leashed := make(map[proto.BlockID]struct{})
+	for _, lsh := range leashes {
+		leashed[lsh.BlockID] = struct{}{}
+	}
+	r := make([]Head, 0, len(heads))
+	for _, h := range heads {
+		if _, ok := leashed[h.BlockID]; ok {
+			r = append(r, h)
+		}
+	}
+	return r, nil
+}
+
 func (l *Linkage) hasBlock(id proto.BlockID) (bool, error) {
 	return l.st.hasBlock(id)
+}
+
+func (l *Linkage) block(id proto.BlockID) (Block, error) {
+	b, err := l.st.block(id)
+	if err != nil {
+		return Block{}, err
+	}
+	bID, err := proto.NewBlockIDFromBytes(b.ID)
+	if err != nil {
+		return Block{}, fmt.Errorf("failed to get block: %w", err)
+	}
+	var pID proto.BlockID
+	if len(b.Parent) > 0 {
+		pID, err = proto.NewBlockIDFromBytes(b.Parent)
+		if err != nil {
+			return Block{}, fmt.Errorf("failed to get block: %w", err)
+		}
+	}
+	ga, err := proto.NewAddressFromBytes(b.Generator)
+	if err != nil {
+		return Block{}, fmt.Errorf("failed to get block: %w", err)
+	}
+	return Block{
+		ID:        bID,
+		Parent:    pID,
+		Height:    b.Height,
+		Generator: ga,
+		Score:     b.Score,
+		Timestamp: b.Timestamp,
+	}, nil
+}
+
+func (l *Linkage) forks() ([]Fork, error) {
+	leashes, err := l.st.leashes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get forks: %w", err)
+	}
+	m := make(map[proto.BlockID][]netip.Addr)
+	for _, lsh := range leashes {
+		m[lsh.BlockID] = append(m[lsh.BlockID], lsh.Addr)
+	}
+	r := make([]Fork, 0, len(m))
+	for k, v := range m {
+		b, blErr := l.block(k)
+		if blErr != nil {
+			return nil, fmt.Errorf("failed to get forks: %w", blErr)
+		}
+		frk := Fork{
+			Longest:         false,
+			HeadBlock:       b.ID,
+			HeadTimestamp:   time.UnixMilli(int64(b.Timestamp)),
+			HeadGenerator:   b.Generator,
+			HeadHeight:      b.Height,
+			Score:           b.Score,
+			Peers:           v,
+			LastCommonBlock: b.ID,
+			Length:          int(b.Height), // Initially length of the fork is the height of the head block.
+		}
+		r = append(r, frk)
+	}
+	sort.Sort(byScoreAndPeersDesc(r))
+
+	longest := r[0]
+	r[0].Longest = true
+
+	for i := range r {
+		lcaID, lcaErr := l.st.lca(longest.HeadBlock, r[i].HeadBlock)
+		if lcaErr != nil {
+			return nil, fmt.Errorf("failed to get forks: %w", lcaErr)
+		}
+		r[i].LastCommonBlock = lcaID // Set last common block ID.
+		lcaBlock, blErr := l.st.block(lcaID)
+		if blErr != nil {
+			return nil, fmt.Errorf("failed to get forks: %w", blErr)
+		}
+		r[i].Length -= int(lcaBlock.Height) // Update length of the fork.
+	}
+
+	return r, nil
 }
