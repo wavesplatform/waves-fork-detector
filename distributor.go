@@ -131,12 +131,12 @@ func (d *Distributor) handleInternalError(peer peer.Peer, ie *peer.InternalErr) 
 		return
 	}
 	zap.S().Infof("[DTR] Closing connection with peer %s", ap.Addr().String())
-	zap.S().Debugf("[DTR] Peer %s failed with error: %v", ap, ie.Err)
+	zap.S().Debugf("[DTR] Peer %s failed with error: %v", ap.Addr().String(), ie.Err)
 	if clErr := peer.Close(); clErr != nil {
-		zap.S().Warnf("Failed to close peer connection: %v", clErr)
+		zap.S().Warnf("Failed to close peer '%s' connection: %v", ap.Addr().String(), clErr)
 	}
 	if urErr := d.registry.UnregisterPeer(ap.Addr()); urErr != nil {
-		zap.S().Warnf("Failed to unregister peer: %v", urErr)
+		zap.S().Warnf("Failed to unregister peer '%s': %v", ap.Addr().String(), urErr)
 	}
 }
 
@@ -262,7 +262,7 @@ func (d *Distributor) handleSignaturesMessage(peer peer.Peer, signatures []crypt
 	for i, s := range signatures {
 		ids[i] = proto.NewBlockIDFromSignature(s)
 	}
-	zap.S().Debugf("[DTR] Signatures received from %s", peer.RemoteAddr().String())
+	zap.S().Debugf("[DTR] Signatures received from '%s'", ap.Addr().String())
 	d.idsCh <- loading.IDsPackage{Peer: ap.Addr(), IDs: ids}
 }
 
@@ -272,8 +272,12 @@ func (d *Distributor) handleBlockIDsMessage(peer peer.Peer, ids []proto.BlockID)
 		zap.S().Warnf("Failed to parse peer address: %v", err)
 		return
 	}
+	if len(ids) == 0 {
+		zap.S().Warnf("Empty IDs list received from '%s'", ap.Addr().String())
+		return
+	}
 	zap.S().Debugf("[DTR] Block IDs [%s..%s] received from %s",
-		ids[0].ShortString(), ids[len(ids)-1].ShortString(), peer.RemoteAddr().String())
+		ids[0].ShortString(), ids[len(ids)-1].ShortString(), ap.Addr().String())
 	d.idsCh <- loading.IDsPackage{Peer: ap.Addr(), IDs: ids}
 }
 
