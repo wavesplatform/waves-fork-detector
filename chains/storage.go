@@ -317,14 +317,19 @@ func (s *storage) lca(id1, id2 proto.BlockID) (proto.BlockID, error) {
 }
 
 func (s *storage) fastBackwardFarthest(sn *leveldb.Snapshot, farthest link, other link) (link, error) {
-	for i := len(farthest.Parents) - 1; i >= 0; i-- {
+	i := len(farthest.Parents) - 1
+	for i >= 0 {
 		if farthest.Height-(1<<i) >= other.Height {
 			l, err := s.getLink(sn, farthest.Parents[i])
 			if err != nil {
 				return link{}, err
 			}
 			farthest = l
+			if len(farthest.Parents) >= i {
+				i = len(farthest.Parents) - 1
+			}
 		}
+		i--
 	}
 	return farthest, nil
 }
