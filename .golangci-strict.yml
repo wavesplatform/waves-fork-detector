@@ -29,6 +29,8 @@ linters-settings:
     # Such cases aren't reported by default.
     # Default: false
     check-type-assertions: true
+    # TODO: Remove the following line after updating golangci-lint to v1.58.3 or higher
+    ignore: ""
 
   exhaustive:
     # Program elements to check for exhaustiveness.
@@ -175,6 +177,11 @@ linters-settings:
     # Default: false
     all: true
 
+  # TODO: Remove the following lines after updating golangci-lint to v1.58.3 or higher
+  gosec:
+    excludes:
+      - G601
+      - G113
 
 linters:
   disable-all: true

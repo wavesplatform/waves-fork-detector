@@ -93,7 +93,7 @@ func newParameters() (*parameters, error) {
 		netBind:         parseAddress(na),
 		declaredAddress: parseAddress(*flagDeclaredAddress),
 		name:            nm,
-		nonce:           rand2.Uint32(),
+		nonce:           rand2.Uint32(), //nolint:gosec // No need for crypto random here.
 		versions:        vss,
 	}, nil
 }

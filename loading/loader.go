@@ -2,6 +2,7 @@ package loading
 
 import (
 	"context"
+	"math/big"
 	rand2 "math/rand/v2"
 	"net/netip"
 	"time"
@@ -50,7 +51,8 @@ type Loader struct {
 	idsCh   <-chan IDsPackage
 	blockCh <-chan BlockPackage
 
-	pl *peerLoader
+	pl       *peerLoader
+	prevDiff *big.Int
 
 	registry *peers.Registry
 	linkage  *chains.Linkage
@@ -102,12 +104,13 @@ func (l *Loader) OK() {
 			zap.S().Warnf("Failed to get peers score: %v", err)
 			return
 		}
-		if p.Score.Cmp(score) > 0 {
+		if diff, lagging := l.isLagging(p.Score, score); lagging {
 			zap.S().Debugf("[LDR] Peer '%s' is still lagging, continue loading", l.pl.peer.ID())
+			l.prevDiff = diff
 			l.continueSync()
 		} else {
 			zap.S().Debugf("[LDR] Peer '%s' is not lagging anymore, resetting loading peer", l.pl.peer.ID())
-			l.pl = nil
+			l.resetLoadingPeer()
 		}
 	}
 }
@@ -178,11 +181,12 @@ func (l *Loader) sync() {
 		}
 	}
 	if len(lagging) == 0 {
-		zap.S().Debug("[LDR] No peers to sync with")
+		zap.S().Infof("No lagging peers")
 		return
 	}
+	zap.S().Infof("Syncing with one of %d lagging peers", len(lagging))
 	// Select random lagging peer and start synchronization with it.
-	p := lagging[rand2.IntN(len(lagging))]
+	p := lagging[rand2.IntN(len(lagging))] //nolint:gosec //we don't need a crypto rand here.
 	l.pl = newPeerLoader(&p, l.linkage, l)
 	zap.S().Infof("Start loading history for peer '%s'", p.ID())
 	l.continueSync()
@@ -229,4 +233,18 @@ func (l *Loader) handleBlock(p BlockPackage) {
 	if err := l.pl.processBlock(p.Block); err != nil {
 		zap.S().Warnf("Failed to process block for peer '%s': %v", p.Peer.String(), err)
 	}
+}
+
+func (l *Loader) isLagging(peerScore, leashScore *big.Int) (*big.Int, bool) {
+	// Determine if difference between peer's score and leash score is changed since last iteration.
+	diff := big.NewInt(0).Sub(peerScore, leashScore)
+	if l.prevDiff == nil {
+		return diff, peerScore.Cmp(leashScore) > 0
+	}
+	return diff, peerScore.Cmp(leashScore) > 0 && l.prevDiff.Cmp(diff) != 0
+}
+
+func (l *Loader) resetLoadingPeer() {
+	l.pl = nil
+	l.prevDiff = nil
 }
