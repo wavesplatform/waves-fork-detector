@@ -6,11 +6,11 @@ import (
 	"net/netip"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
-
 	"github.com/wavesplatform/gowaves/pkg/proto"
 )
 
@@ -96,6 +96,12 @@ func (s *storage) peer(addr netip.Addr) (Peer, error) {
 }
 
 func (s *storage) putPeer(peer Peer) error {
+	if !peer.AddressPort.Addr().Is4() {
+		return fmt.Errorf("invalid IP address length")
+	}
+	if !utf8.ValidString(peer.Name) {
+		return fmt.Errorf("invalid peer name")
+	}
 	batch := new(leveldb.Batch)
 	k := key{addr: peer.AddressPort.Addr()}
 	v := value{

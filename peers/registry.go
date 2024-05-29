@@ -234,6 +234,10 @@ func (r *Registry) AppendAddresses(addresses []*net.TCPAddr) int {
 			zap.S().Debugf("Error adding address: %v", err)
 			continue
 		}
+		if !ap.Addr().Is4() {
+			zap.S().Debugf("[REG] Skipping non-IPv4 address: %s", ap.String())
+			continue
+		}
 		if ap.Addr().IsLoopback() {
 			zap.S().Debugf("[REG] Skipping loopback address: %s", ap.String())
 			continue
