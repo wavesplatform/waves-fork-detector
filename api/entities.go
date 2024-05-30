@@ -8,12 +8,13 @@ import (
 )
 
 type status struct {
-	ShortForksCount     int `json:"short_forks_count"`
-	LongForksCount      int `json:"long_forks_count"`
-	AllPeersCount       int `json:"all_peers_count"`
-	FriendlyPeersCount  int `json:"friendly_peers_count"`
-	ConnectedPeersCount int `json:"connected_peers_count"`
-	GoroutinesCount     int `json:"goroutines_count"`
+	Version             string `json:"version"`
+	ShortForksCount     int    `json:"short_forks_count"`
+	LongForksCount      int    `json:"long_forks_count"`
+	AllPeersCount       int    `json:"all_peers_count"`
+	FriendlyPeersCount  int    `json:"friendly_peers_count"`
+	ConnectedPeersCount int    `json:"connected_peers_count"`
+	GoroutinesCount     int    `json:"goroutines_count"`
 }
 
 type headInfo struct {

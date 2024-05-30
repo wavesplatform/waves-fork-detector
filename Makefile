@@ -50,15 +50,15 @@ vet-check:
 	golangci-lint run -c .golangci-strict.yml
 
 build-linux-amd64:
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/bin/linux-amd64/forkdetector -ldflags="-X main.version=$(VERSION)" .
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/bin/linux-amd64/forkdetector -ldflags="-X github.com/alexeykiselev/waves-fork-detector/version.version=$(VERSION)" .
 build-linux-arm64:
-	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o build/bin/linux-arm64/forkdetector -ldflags="-X main.version=$(VERSION)" .
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o build/bin/linux-arm64/forkdetector -ldflags="-X github.com/alexeykiselev/waves-fork-detector/version.version=$(VERSION)" .
 build-darwin-amd64:
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o build/bin/darwin-amd64/forkdetector -ldflags="-X main.version=$(VERSION)" .
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o build/bin/darwin-amd64/forkdetector -ldflags="-X github.com/alexeykiselev/waves-fork-detector/version.version=$(VERSION)" .
 build-darwin-arm64:
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o build/bin/darwin-arm64/forkdetector -ldflags="-X main.version=$(VERSION)" .
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o build/bin/darwin-arm64/forkdetector -ldflags="-X github.com/alexeykiselev/waves-fork-detector/version.version=$(VERSION)" .
 build-windows-amd64:
-	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o build/bin/windows-amd64/forkdetector.exe -ldflags="main.version=$(VERSION)" .
+	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o build/bin/windows-amd64/forkdetector.exe -ldflags="github.com/alexeykiselev/waves-fork-detector/version.version=$(VERSION)" .
 
 release: ver build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 build-windows-amd64
 

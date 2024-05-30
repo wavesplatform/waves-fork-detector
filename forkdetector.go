@@ -18,10 +18,7 @@ import (
 	"github.com/alexeykiselev/waves-fork-detector/chains"
 	"github.com/alexeykiselev/waves-fork-detector/loading"
 	"github.com/alexeykiselev/waves-fork-detector/peers"
-)
-
-var (
-	version = "v0.0.0"
+	"github.com/alexeykiselev/waves-fork-detector/version"
 )
 
 func main() {
@@ -51,7 +48,7 @@ func run() error {
 	ctx, done := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer done()
 
-	zap.S().Infof("Waves Fork Detector %s", version)
+	zap.S().Infof("Waves Fork Detector %s", version.ForkDetectorVersion())
 	p.log()
 
 	reg, err := peers.NewRegistry(p.scheme, p.declaredAddress, p.versions, p.dbPath)

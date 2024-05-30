@@ -20,6 +20,7 @@ import (
 
 	"github.com/alexeykiselev/waves-fork-detector/chains"
 	"github.com/alexeykiselev/waves-fork-detector/peers"
+	"github.com/alexeykiselev/waves-fork-detector/version"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -138,6 +139,7 @@ func (a *API) status(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	s := status{
+		Version:             version.ForkDetectorVersion(),
 		ShortForksCount:     stats.Short,
 		LongForksCount:      stats.Long,
 		AllPeersCount:       len(all),
