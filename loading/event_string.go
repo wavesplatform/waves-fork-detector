@@ -9,16 +9,17 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[eventStart-0]
-	_ = x[eventIDs-1]
-	_ = x[eventBlock-2]
-	_ = x[eventTick-3]
-	_ = x[eventTimeout-4]
-	_ = x[eventQueueReady-5]
+	_ = x[eventRestart-1]
+	_ = x[eventIDs-2]
+	_ = x[eventBlock-3]
+	_ = x[eventTick-4]
+	_ = x[eventTimeout-5]
+	_ = x[eventQueueReady-6]
 }
 
-const _event_name = "StartIDsBlockTickTimeoutQueueReady"
+const _event_name = "StartRestartIDsBlockTickTimeoutQueueReady"
 
-var _event_index = [...]uint8{0, 5, 8, 13, 17, 24, 34}
+var _event_index = [...]uint8{0, 5, 12, 15, 20, 24, 31, 41}
 
 func (i event) String() string {
 	if i < 0 || i >= event(len(_event_index)-1) {

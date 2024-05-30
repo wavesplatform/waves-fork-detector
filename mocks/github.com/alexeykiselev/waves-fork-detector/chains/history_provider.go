@@ -79,6 +79,62 @@ func (_c *MockHistoryProvider_HasBlock_Call) RunAndReturn(run func(proto.BlockID
 	return _c
 }
 
+// LCB provides a mock function with given fields: addr
+func (_m *MockHistoryProvider) LCB(addr netip.Addr) (proto.BlockID, error) {
+	ret := _m.Called(addr)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LCB")
+	}
+
+	var r0 proto.BlockID
+	var r1 error
+	if rf, ok := ret.Get(0).(func(netip.Addr) (proto.BlockID, error)); ok {
+		return rf(addr)
+	}
+	if rf, ok := ret.Get(0).(func(netip.Addr) proto.BlockID); ok {
+		r0 = rf(addr)
+	} else {
+		r0 = ret.Get(0).(proto.BlockID)
+	}
+
+	if rf, ok := ret.Get(1).(func(netip.Addr) error); ok {
+		r1 = rf(addr)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHistoryProvider_LCB_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LCB'
+type MockHistoryProvider_LCB_Call struct {
+	*mock.Call
+}
+
+// LCB is a helper method to define mock.On call
+//   - addr netip.Addr
+func (_e *MockHistoryProvider_Expecter) LCB(addr interface{}) *MockHistoryProvider_LCB_Call {
+	return &MockHistoryProvider_LCB_Call{Call: _e.mock.On("LCB", addr)}
+}
+
+func (_c *MockHistoryProvider_LCB_Call) Run(run func(addr netip.Addr)) *MockHistoryProvider_LCB_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(netip.Addr))
+	})
+	return _c
+}
+
+func (_c *MockHistoryProvider_LCB_Call) Return(_a0 proto.BlockID, _a1 error) *MockHistoryProvider_LCB_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHistoryProvider_LCB_Call) RunAndReturn(run func(netip.Addr) (proto.BlockID, error)) *MockHistoryProvider_LCB_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LastIDs provides a mock function with given fields: id, count
 func (_m *MockHistoryProvider) LastIDs(id proto.BlockID, count int) ([]proto.BlockID, error) {
 	ret := _m.Called(id, count)

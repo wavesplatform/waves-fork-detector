@@ -31,6 +31,7 @@ type Leasher interface {
 
 type HistoryProvider interface {
 	Leasher
+	LCB(addr netip.Addr) (proto.BlockID, error)
 	HasBlock(id proto.BlockID) (bool, error)
 	LastIDs(id proto.BlockID, count int) ([]proto.BlockID, error)
 	PutBlock(block *proto.Block, addr netip.Addr) error
@@ -272,6 +273,57 @@ func (l *Linkage) Stats() (Stats, error) {
 		}
 	}
 	return r, nil
+}
+
+// LCB returns the last common block with the longest chain. For the unleashed peer the genesis block ID is returned.
+func (l *Linkage) LCB(peer netip.Addr) (proto.BlockID, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	head, err := l.st.leash(peer)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return l.genesis, nil // Return genesis block ID in case of no leash for the peer.
+		}
+		return proto.BlockID{}, fmt.Errorf("failed to get last common block of '%s': %w", peer.String(), err)
+	}
+	leashes, err := l.st.leashes()
+	if err != nil {
+		return proto.BlockID{}, fmt.Errorf("failed to get last common block of '%s': %w", peer.String(), err)
+	}
+	m := make(map[proto.BlockID][]netip.Addr)
+	for _, lsh := range leashes {
+		m[lsh.BlockID] = append(m[lsh.BlockID], lsh.Addr)
+	}
+	score := big.NewInt(0)
+	peers := 0
+	var longest proto.BlockID
+	for k, v := range m {
+		b, blErr := l.block(k)
+		if blErr != nil {
+			return proto.BlockID{}, fmt.Errorf("failed to get last common block of '%s': %w", peer.String(), blErr)
+		}
+		switch score.Cmp(b.Score) {
+		case 0:
+			if len(v) > peers {
+				score = b.Score
+				peers = len(v)
+				longest = k
+			}
+		case -1:
+			score = b.Score
+			longest = k
+			peers = len(v)
+		}
+	}
+	if head == longest { // Peer is on the longest fork.
+		return head, nil
+	}
+	lca, lcaErr := l.st.lca(longest, head)
+	if lcaErr != nil {
+		return proto.BlockID{}, fmt.Errorf("failed to get last common block of '%s': %w", peer.String(), lcaErr)
+	}
+	return lca, nil
 }
 
 func (l *Linkage) Forks() ([]Fork, error) {

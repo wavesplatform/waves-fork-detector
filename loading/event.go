@@ -5,6 +5,7 @@ type event int
 
 const (
 	eventStart event = iota
+	eventRestart
 	eventIDs
 	eventBlock
 	eventTick

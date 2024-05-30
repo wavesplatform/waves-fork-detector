@@ -25,8 +25,9 @@ import (
 // In case of no response from the peer, Loader selects another peer from the group of unleashed peers.
 
 const (
-	timerInterval  = 5 * time.Second
-	tickerInterval = time.Second
+	timerInterval    = 5 * time.Second
+	tickerInterval   = time.Second
+	restartThreshold = 10
 )
 
 type IDsPackage struct {
@@ -44,6 +45,37 @@ type Reporter interface {
 	Fail()
 }
 
+type failureCounter struct {
+	m map[netip.Addr]int
+}
+
+func (fc *failureCounter) inc(addr netip.Addr) {
+	if fc.m == nil {
+		fc.m = make(map[netip.Addr]int)
+	}
+	if _, ok := fc.m[addr]; !ok {
+		fc.m[addr] = 0
+	}
+	fc.m[addr]++
+}
+
+func (fc *failureCounter) count(addr netip.Addr) int {
+	if fc.m == nil {
+		return 0
+	}
+	if c, ok := fc.m[addr]; ok {
+		return c
+	}
+	return 0
+}
+
+func (fc *failureCounter) reset(addr netip.Addr) {
+	if fc.m == nil {
+		fc.m = make(map[netip.Addr]int)
+	}
+	fc.m[addr] = 0
+}
+
 type Loader struct {
 	wait func() error
 	ctx  context.Context
@@ -53,6 +85,7 @@ type Loader struct {
 
 	pl       *peerLoader
 	prevDiff *big.Int
+	fc       failureCounter
 
 	registry *peers.Registry
 	linkage  *chains.Linkage
@@ -93,6 +126,7 @@ func (l *Loader) Shutdown() {
 
 func (l *Loader) OK() {
 	if l.pl != nil && l.pl.sm.MustState() == stateIdle {
+		l.fc.reset(l.pl.peer.ID())
 		// Check score again and continue sync if needed.
 		p, err := l.registry.Peer(l.pl.peer.ID())
 		if err != nil {
@@ -118,6 +152,7 @@ func (l *Loader) OK() {
 func (l *Loader) Fail() {
 	if l.pl != nil && l.pl.sm.MustState() == stateDone {
 		zap.S().Debugf("[LDR] Peer '%s' failed to load history", l.pl.peer.ID())
+		l.fc.inc(l.pl.peer.ID())
 		l.pl = nil
 	}
 }
@@ -189,6 +224,9 @@ func (l *Loader) sync() {
 	p := lagging[rand2.IntN(len(lagging))] //nolint:gosec //we don't need a crypto rand here.
 	l.pl = newPeerLoader(&p, l.linkage, l)
 	zap.S().Infof("Start loading history for peer '%s'", p.ID())
+	if l.fc.count(l.pl.peer.ID()) >= restartThreshold {
+		l.restartSync()
+	}
 	l.continueSync()
 }
 
@@ -196,6 +234,15 @@ func (l *Loader) continueSync() {
 	l.ticker.Reset(tickerInterval) // Start ticker.
 	if err := l.pl.start(); err != nil {
 		zap.S().Warnf("Failed to syncronize with peer '%s': %v", l.pl.peer.ID(), err)
+	}
+}
+
+func (l *Loader) restartSync() {
+	zap.S().Debugf("[LDR] Restarting syncronization with peer '%s'", l.pl.peer.ID())
+	l.fc.reset(l.pl.peer.ID())
+	l.ticker.Reset(tickerInterval)
+	if err := l.pl.restart(); err != nil {
+		zap.S().Warnf("Failed to restart syncronization with peer '%s': %v", l.pl.peer.ID(), err)
 	}
 }
 

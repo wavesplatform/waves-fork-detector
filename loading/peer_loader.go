@@ -53,6 +53,7 @@ func (pl *peerLoader) configureIdleState() {
 	pl.sm.Configure(stateIdle).
 		OnEntryFrom(eventQueueReady, pl.reportOK).
 		Permit(eventStart, stateWaitingForIDs).
+		Permit(eventRestart, stateWaitingForIDs).
 		Ignore(eventIDs).
 		Ignore(eventBlock).
 		Ignore(eventTick).
@@ -63,10 +64,12 @@ func (pl *peerLoader) configureIdleState() {
 func (pl *peerLoader) configureWaitingForIDs() {
 	pl.sm.Configure(stateWaitingForIDs).
 		OnEntryFrom(eventStart, pl.requestIDs).
+		OnEntryFrom(eventRestart, pl.requestIDsFromLCA).
 		Permit(eventIDs, stateWaitingForBlocks).
 		InternalTransition(eventTick, pl.onTick).
 		Permit(eventTimeout, stateDone).
 		Ignore(eventStart).
+		Ignore(eventRestart).
 		Ignore(eventBlock).
 		Ignore(eventQueueReady)
 }
@@ -79,6 +82,7 @@ func (pl *peerLoader) configureWaitingForBlocksState() {
 		Permit(eventTimeout, stateDone).
 		Permit(eventQueueReady, stateIdle).
 		Ignore(eventStart).
+		Ignore(eventRestart).
 		Ignore(eventIDs)
 }
 
@@ -86,6 +90,7 @@ func (pl *peerLoader) configureDoneState() {
 	pl.sm.Configure(stateDone).
 		OnEntry(pl.handleFailure).
 		Ignore(eventStart).
+		Ignore(eventRestart).
 		Ignore(eventIDs).
 		Ignore(eventBlock).
 		Ignore(eventTick).
@@ -96,6 +101,14 @@ func (pl *peerLoader) start() error {
 	err := pl.sm.Fire(eventStart)
 	if err != nil {
 		return fmt.Errorf("failed to start peer loader '%s': %w", pl.peer.ID(), err)
+	}
+	return nil
+}
+
+func (pl *peerLoader) restart() error {
+	err := pl.sm.Fire(eventRestart)
+	if err != nil {
+		return fmt.Errorf("failed to restart peer loader '%s': %w", pl.peer.ID(), err)
 	}
 	return nil
 }
@@ -142,6 +155,20 @@ func (pl *peerLoader) requestIDs(_ context.Context, _ ...any) error {
 		return fmt.Errorf("failed to request IDs from '%s': %w", pl.peer.ID(), err)
 	}
 	lastIDs, err := pl.hp.LastIDs(leash, idsBatchSize)
+	if err != nil {
+		return fmt.Errorf("failed to request IDs from '%s': %w", pl.peer.ID(), err)
+	}
+	pl.peer.RequestBlockIDs(lastIDs)
+	pl.timestamp = time.Now()
+	return nil
+}
+
+func (pl *peerLoader) requestIDsFromLCA(_ context.Context, _ ...any) error {
+	lca, err := pl.hp.LCB(pl.peer.ID())
+	if err != nil {
+		return fmt.Errorf("failed to request IDs from '%s': %w", pl.peer.ID(), err)
+	}
+	lastIDs, err := pl.hp.LastIDs(lca, idsBatchSize)
 	if err != nil {
 		return fmt.Errorf("failed to request IDs from '%s': %w", pl.peer.ID(), err)
 	}
