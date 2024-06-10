@@ -327,6 +327,7 @@ func (s *storage) fastBackwardFarthest(sn *leveldb.Snapshot, farthest link, othe
 			farthest = l
 			if i >= len(farthest.Parents) {
 				i = len(farthest.Parents) - 1
+				continue
 			}
 		}
 		i--

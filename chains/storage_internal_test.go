@@ -296,6 +296,27 @@ func TestCommonAncestorLongerForks(t *testing.T) {
 	}
 }
 
+func TestSameForkDifferentLengths(t *testing.T) {
+	st, id := createTestStorage(t)
+	var idFarthest proto.BlockID
+	var idOther proto.BlockID
+	for i := 2; i <= 761; i++ {
+		bl := createNthBlock(t, id, i)
+		err := st.putProtoBlock(bl)
+		require.NoError(t, err)
+		switch i {
+		case 11:
+			idOther = bl.BlockID()
+		case 761:
+			idFarthest = bl.BlockID()
+		}
+		id = bl.BlockID()
+	}
+	a, err := st.lca(idFarthest, idOther)
+	require.NoError(t, err)
+	assert.Equal(t, idOther, a)
+}
+
 func BenchmarkLCAOnTwo1MBlockForks(b *testing.B) {
 	st, id := createTestStorage(b)
 	for i := 0; i < 1_000_000; i++ {
