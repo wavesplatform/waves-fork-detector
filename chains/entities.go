@@ -38,15 +38,16 @@ type Stats struct {
 }
 
 type Fork struct {
-	Longest         bool               `json:"longest"`           // Indicates that the fork is the longest
-	HeadBlock       proto.BlockID      `json:"head_block"`        // The last block of the fork
-	HeadTimestamp   time.Time          `json:"head_timestamp"`    // The timestamp of the last block of the fork
-	HeadGenerator   proto.WavesAddress `json:"head_generator"`    // The generator of the last block of the fork
-	HeadHeight      uint32             `json:"head_height"`       // The height of the last block of the fork
-	Score           *big.Int           `json:"score"`             // The score of the fork
-	Peers           []netip.Addr       `json:"peers"`             // Peers that seen on the fork
-	LastCommonBlock proto.BlockID      `json:"last_common_block"` // The last common block with the longest fork
-	Length          int                `json:"length"`            // The number of blocks since the last common block
+	Longest         bool               `json:"longest"`           // Indicates that the fork is the longest.
+	HeadBlock       proto.BlockID      `json:"head_block"`        // The last block of the fork.
+	HeadTimestamp   time.Time          `json:"head_timestamp"`    // The timestamp of the last block of the fork.
+	HeadGenerator   proto.WavesAddress `json:"head_generator"`    // The generator of the last block of the fork.
+	HeadHeight      uint32             `json:"head_height"`       // The height of the last block of the fork.
+	Score           *big.Int           `json:"score"`             // The score of the fork.
+	PeersCount      int                `json:"peers_count"`       // The number of peers that seen the fork.
+	Peers           []netip.Addr       `json:"peers"`             // Peers that seen on the fork.
+	LastCommonBlock proto.BlockID      `json:"last_common_block"` // The last common block with the longest fork.
+	Length          int                `json:"length"`            // The number of blocks since the last common block.
 }
 
 type byScoreAndPeersDesc []Fork

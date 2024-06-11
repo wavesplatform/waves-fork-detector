@@ -260,7 +260,7 @@ func (l *Linkage) Stats() (Stats, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	forks, err := l.forks()
+	forks, err := l.forks(nil)
 	if err != nil {
 		return Stats{}, fmt.Errorf("failed to get stats: %w", err)
 	}
@@ -326,11 +326,11 @@ func (l *Linkage) LCB(peer netip.Addr) (proto.BlockID, error) {
 	return lca, nil
 }
 
-func (l *Linkage) Forks() ([]Fork, error) {
+func (l *Linkage) Forks(peers []netip.Addr) ([]Fork, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	return l.forks()
+	return l.forks(peers)
 }
 
 func (l *Linkage) Fork(peer netip.Addr) (Fork, error) {
@@ -375,6 +375,7 @@ func (l *Linkage) Fork(peer netip.Addr) (Fork, error) {
 				HeadHeight:      b.Height,
 				Score:           b.Score,
 				Peers:           v,
+				PeersCount:      len(v),
 				LastCommonBlock: b.ID,
 				Length:          int(b.Height), // Initially length of the fork is the height of the head block.
 			}
@@ -455,13 +456,16 @@ func (l *Linkage) block(id proto.BlockID) (Block, error) {
 	}, nil
 }
 
-func (l *Linkage) forks() ([]Fork, error) {
+func (l *Linkage) forks(peers []netip.Addr) ([]Fork, error) {
 	leashes, err := l.st.leashes()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get forks: %w", err)
 	}
 	m := make(map[proto.BlockID][]netip.Addr)
 	for _, lsh := range leashes {
+		if len(peers) > 0 && !slices.Contains(peers, lsh.Addr) {
+			continue // Skip leash if the peer is not in the list.
+		}
 		m[lsh.BlockID] = append(m[lsh.BlockID], lsh.Addr)
 	}
 	r := make([]Fork, 0, len(m))
@@ -478,6 +482,7 @@ func (l *Linkage) forks() ([]Fork, error) {
 			HeadHeight:      b.Height,
 			Score:           b.Score,
 			Peers:           v,
+			PeersCount:      len(v),
 			LastCommonBlock: b.ID,
 			Length:          int(b.Height), // Initially length of the fork is the height of the head block.
 		}

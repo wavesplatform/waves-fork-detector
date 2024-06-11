@@ -105,14 +105,15 @@ func (a *API) runServer() error {
 
 func (a *API) routes() chi.Router {
 	r := chi.NewRouter()
-	r.Get("/peers/all", a.peers)         // Returns the list of all known peers
-	r.Get("/peers/friendly", a.friendly) // Returns the list of peers that have been successfully connected at least once
-	r.Get("/connections", a.connections) // Returns the list of active connections
-	r.Get("/heads", a.heads)             // Returns the combined info about heads for all connected peers
-	r.Get("/leashes", a.leashes)         // Returns the list of all known leashes grouped by block IDs.
-	r.Get("/status", a.status)           // Status information
-	r.Get("/forks", a.forks)             // Returns the combined info about forks for all connected peers
-	r.Get("/fork/{address}", a.fork)     // Returns the info about fork of the given peer
+	r.Get("/peers/all", a.peers)          // Returns the list of all known peers.
+	r.Get("/peers/friendly", a.friendly)  // Returns the list of peers that have been successfully connected at least once.
+	r.Get("/connections", a.connections)  // Returns the list of active connections.
+	r.Get("/heads", a.heads)              // Returns the combined info about heads for all connected peers.
+	r.Get("/leashes", a.leashes)          // Returns the list of all known leashes grouped by block IDs.
+	r.Get("/status", a.status)            // Status information.
+	r.Get("/forks", a.forks)              // Returns the combined info about forks for all ever connected peers.
+	r.Get("/active-forks", a.activeForks) // Returns the combined info about forks for currently connected peers.
+	r.Get("/fork/{address}", a.fork)      // Returns the info about fork of the given peer.
 	return r
 }
 
@@ -258,7 +259,29 @@ func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *API) forks(w http.ResponseWriter, _ *http.Request) {
-	forks, err := a.linkage.Forks()
+	forks, err := a.linkage.Forks(nil)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	err = json.NewEncoder(w).Encode(forks)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal status to JSON: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (a *API) activeForks(w http.ResponseWriter, _ *http.Request) {
+	connections, err := a.registry.Connections()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	ps := make([]netip.Addr, len(connections))
+	for i, conn := range connections {
+		ps[i] = conn.ID()
+	}
+	forks, err := a.linkage.Forks(ps)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
