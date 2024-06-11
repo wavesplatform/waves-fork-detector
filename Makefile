@@ -73,3 +73,7 @@ dist: clean release
 
 mock:
 	@mockery
+
+
+docker: ver
+	@docker build --build-arg VER=${VERSION} . -t ${ORGANISATION}/${PROJECT}:${VERSION}
