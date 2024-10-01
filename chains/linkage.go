@@ -3,6 +3,7 @@ package chains
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/netip"
 	"slices"
@@ -370,7 +371,7 @@ func (l *Linkage) Fork(peer netip.Addr) (Fork, error) {
 			fork = Fork{
 				Longest:         false,
 				HeadBlock:       b.ID,
-				HeadTimestamp:   time.UnixMilli(int64(b.Timestamp)),
+				HeadTimestamp:   time.UnixMilli(b.Timestamp),
 				HeadGenerator:   b.Generator,
 				HeadHeight:      b.Height,
 				Score:           b.Score,
@@ -398,6 +399,30 @@ func (l *Linkage) Fork(peer netip.Addr) (Fork, error) {
 	fork.Length -= int(lcaBlock.Height) // Update length of the fork.
 
 	return fork, nil
+}
+
+// ForkGenerators returns the list of generators with the number of generated blocks for the `count` of ancestor \
+// of `blockID` block.
+func (l *Linkage) ForkGenerators(blockID proto.BlockID, count int) ([]GeneratorStats, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	m := make(map[proto.WavesAddress]int)
+	bs, err := l.st.getBlocks(blockID, count)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get generators: %w", err)
+	}
+	for _, b := range bs {
+		m[b.Generator]++
+	}
+
+	stats := make([]GeneratorStats, 0, len(m))
+	for k, v := range m {
+		stats = append(stats, GeneratorStats{Generator: k, Blocks: v})
+	}
+	r := byBlocksCountDesc(stats)
+	sort.Sort(r)
+	return r, nil
 }
 
 func (l *Linkage) activeHeads() ([]Head, error) {
@@ -452,8 +477,15 @@ func (l *Linkage) block(id proto.BlockID) (Block, error) {
 		Height:    b.Height,
 		Generator: ga,
 		Score:     b.Score,
-		Timestamp: b.Timestamp,
+		Timestamp: safeTimestamp(b.Timestamp),
 	}, nil
+}
+
+func safeTimestamp(ts uint64) int64 {
+	if ts < math.MaxInt64 {
+		return int64(ts)
+	}
+	panic("timestamp is too large")
 }
 
 func (l *Linkage) forks(peers []netip.Addr) ([]Fork, error) {
@@ -477,7 +509,7 @@ func (l *Linkage) forks(peers []netip.Addr) ([]Fork, error) {
 		frk := Fork{
 			Longest:         false,
 			HeadBlock:       b.ID,
-			HeadTimestamp:   time.UnixMilli(int64(b.Timestamp)),
+			HeadTimestamp:   time.UnixMilli(b.Timestamp),
 			HeadGenerator:   b.Generator,
 			HeadHeight:      b.Height,
 			Score:           b.Score,

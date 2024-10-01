@@ -1,6 +1,9 @@
 package chains
 
-import "math/big"
+import (
+	"math"
+	"math/big"
+)
 
 const decimalBase = 10
 
@@ -8,6 +11,9 @@ func calculateScore(baseTarget uint64) *big.Int {
 	res := big.NewInt(0)
 	if baseTarget == 0 {
 		return res
+	}
+	if baseTarget > math.MaxInt64 {
+		panic("base target is too big")
 	}
 	bt := big.NewInt(int64(baseTarget))
 	maxBlockScore, ok := big.NewInt(0).SetString("18446744073709551616", decimalBase)

@@ -15,7 +15,7 @@ type Block struct {
 	Height    uint32
 	Generator proto.WavesAddress
 	Score     *big.Int
-	Timestamp uint64
+	Timestamp int64
 }
 
 type Head struct {
@@ -66,4 +66,23 @@ func (a byScoreAndPeersDesc) Less(i, j int) bool {
 		return len(a[i].Peers) > len(a[j].Peers)
 	}
 	return r > 0
+}
+
+type GeneratorStats struct {
+	Generator proto.WavesAddress `json:"generator"`
+	Blocks    int                `json:"blocks"`
+}
+
+type byBlocksCountDesc []GeneratorStats
+
+func (a byBlocksCountDesc) Len() int {
+	return len(a)
+}
+
+func (a byBlocksCountDesc) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+
+func (a byBlocksCountDesc) Less(i, j int) bool {
+	return a[i].Blocks > a[j].Blocks
 }

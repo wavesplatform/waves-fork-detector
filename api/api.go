@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"runtime"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -105,18 +106,20 @@ func (a *API) runServer() error {
 
 func (a *API) routes() chi.Router {
 	r := chi.NewRouter()
-	r.Get("/peers/all", a.peers)          // Returns the list of all known peers.
-	r.Get("/peers/friendly", a.friendly)  // Returns the list of peers that have been successfully connected at least once.
-	r.Get("/connections", a.connections)  // Returns the list of active connections.
-	r.Get("/heads", a.heads)              // Returns the combined info about heads for all connected peers.
-	r.Get("/leashes", a.leashes)          // Returns the list of all known leashes grouped by block IDs.
-	r.Get("/status", a.status)            // Status information.
-	r.Get("/forks", a.forks)              // Returns the combined info about forks for all ever connected peers.
-	r.Get("/active-forks", a.activeForks) // Returns the combined info about forks for currently connected peers.
-	r.Get("/fork/{address}", a.fork)      // Returns the info about fork of the given peer.
+	r.Get("/peers/all", a.peers)
+	r.Get("/peers/friendly", a.friendly)
+	r.Get("/connections", a.connections)
+	r.Get("/heads", a.heads)
+	r.Get("/leashes", a.leashes)
+	r.Get("/status", a.status)
+	r.Get("/forks", a.forks)
+	r.Get("/active-forks", a.activeForks)
+	r.Get("/fork/{address}", a.fork)
+	r.Get("/fork/{address}/generators/{blocks}", a.forkGenerators)
 	return r
 }
 
+// status returns status information.
 func (a *API) status(w http.ResponseWriter, _ *http.Request) {
 	goroutines := runtime.NumGoroutine()
 	stats, err := a.linkage.Stats()
@@ -155,6 +158,7 @@ func (a *API) status(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// peers returns the list of all known peers.
 func (a *API) peers(w http.ResponseWriter, _ *http.Request) {
 	all, err := a.registry.Peers()
 	if err != nil {
@@ -168,6 +172,7 @@ func (a *API) peers(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// friendly returns the list of peers that have been successfully connected at least once.
 func (a *API) friendly(w http.ResponseWriter, _ *http.Request) {
 	friendly, err := a.registry.FriendlyPeers()
 	if err != nil {
@@ -181,6 +186,7 @@ func (a *API) friendly(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// connections returns the list of active connections.
 func (a *API) connections(w http.ResponseWriter, _ *http.Request) {
 	connections, err := a.registry.Connections()
 	if err != nil {
@@ -194,6 +200,7 @@ func (a *API) connections(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// heads returns the combined info about heads for all connected peers.
 func (a *API) heads(w http.ResponseWriter, _ *http.Request) {
 	heads, err := a.linkage.ActiveHeads()
 	if err != nil {
@@ -212,7 +219,7 @@ func (a *API) heads(w http.ResponseWriter, _ *http.Request) {
 			ID:        h.BlockID.String(),
 			Height:    b.Height,
 			Score:     b.Score,
-			Timestamp: time.UnixMilli(int64(b.Timestamp)),
+			Timestamp: time.UnixMilli(b.Timestamp),
 		}
 	}
 	err = json.NewEncoder(w).Encode(infos)
@@ -222,6 +229,7 @@ func (a *API) heads(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// leashes returns the list of all known leashes grouped by block IDs.
 func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
 	leashes, err := a.linkage.Leashes()
 	if err != nil {
@@ -243,7 +251,7 @@ func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
 			BlockID:    b.ID.String(),
 			Height:     b.Height,
 			Score:      b.Score,
-			Timestamp:  time.UnixMilli(int64(b.Timestamp)),
+			Timestamp:  time.UnixMilli(b.Timestamp),
 			Generator:  b.Generator,
 			PeersCount: len(v),
 			Peers:      v,
@@ -271,6 +279,7 @@ func (a *API) forks(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// activaForks returns the combined info about forks for all ever connected peers.
 func (a *API) activeForks(w http.ResponseWriter, _ *http.Request) {
 	connections, err := a.registry.Connections()
 	if err != nil {
@@ -293,6 +302,7 @@ func (a *API) activeForks(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// fork returns the info about fork of the given peer.
 func (a *API) fork(w http.ResponseWriter, r *http.Request) {
 	addr := chi.URLParam(r, "address")
 	peer, err := netip.ParseAddr(addr)
@@ -317,6 +327,56 @@ func (a *API) fork(w http.ResponseWriter, r *http.Request) {
 	err = json.NewEncoder(w).Encode(fork)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal status to JSON: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+// forkGenerators returns the list of generators of the fork of the given peer.
+func (a *API) forkGenerators(w http.ResponseWriter, r *http.Request) {
+	addr := chi.URLParam(r, "address")
+	peer, err := netip.ParseAddr(addr)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid peer address '%s'", addr), http.StatusBadRequest)
+		return
+	}
+
+	count := chi.URLParam(r, "blocks")
+	c, err := strconv.Atoi(count)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid number of blocks '%s'", addr), http.StatusBadRequest)
+		return
+	}
+
+	ok, err := a.linkage.HasLeash(peer)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, fmt.Sprintf("Peer '%s' is unknown", addr), http.StatusNotFound)
+		return
+	}
+	fork, err := a.linkage.Fork(peer)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if c == 0 {
+		c = fork.Length
+		if fork.Longest {
+			c = 1000 // For the longest fork we get only generators of 1000 last blocks.
+		}
+	}
+
+	generators, err := a.linkage.ForkGenerators(fork.HeadBlock, c)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	err = json.NewEncoder(w).Encode(generators)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal to JSON: %v", err), http.StatusInternalServerError)
 		return
 	}
 }

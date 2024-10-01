@@ -265,6 +265,62 @@ func (s *storage) getAncestors(id proto.BlockID, count int) ([]proto.BlockID, er
 	return r, nil
 }
 
+func (s *storage) getBlocks(id proto.BlockID, count int) ([]Block, error) {
+	sn, err := s.db.GetSnapshot()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get blocks: %w", err)
+	}
+	defer sn.Release()
+
+	n, err := s.getNumOfBlockID(sn, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get blocks: %w", err)
+	}
+	r := make([]Block, 0, count)
+	i := 0
+	for i < count {
+		b, gbErr := s.getBlock(sn, n)
+		if gbErr != nil {
+			return nil, fmt.Errorf("failed to get blocks: %w", gbErr)
+		}
+		bID, idErr := proto.NewBlockIDFromBytes(b.ID)
+		if idErr != nil {
+			return nil, fmt.Errorf("failed to get blocks: %w", idErr)
+		}
+		var pID proto.BlockID
+		if len(b.Parent) > 0 {
+			var pErr error
+			pID, pErr = proto.NewBlockIDFromBytes(b.Parent)
+			if pErr != nil {
+				return nil, fmt.Errorf("failed to get blocks: %w", pErr)
+			}
+		}
+		ga, aErr := proto.NewAddressFromBytes(b.Generator)
+		if aErr != nil {
+			return nil, fmt.Errorf("failed to get blocks: %w", aErr)
+		}
+		bb := Block{
+			ID:        bID,
+			Parent:    pID,
+			Height:    b.Height,
+			Generator: ga,
+			Score:     b.Score,
+			Timestamp: safeTimestamp(b.Timestamp),
+		}
+		r = append(r, bb)
+		if len(b.Parent) == 0 {
+			break
+		}
+		l, glErr := s.getLink(sn, n)
+		if glErr != nil {
+			return nil, fmt.Errorf("failed to get blocks: %w", glErr)
+		}
+		n = l.Parents[0]
+		i++
+	}
+	return r, nil
+}
+
 func (s *storage) lca(id1, id2 proto.BlockID) (proto.BlockID, error) {
 	sn, err := s.db.GetSnapshot()
 	if err != nil {
