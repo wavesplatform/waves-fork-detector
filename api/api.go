@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/netip"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -266,8 +268,13 @@ func (a *API) leashes(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func (a *API) forks(w http.ResponseWriter, _ *http.Request) {
-	forks, err := a.linkage.Forks(nil)
+func (a *API) forks(w http.ResponseWriter, r *http.Request) {
+	ps, err := getPeers(r)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusBadRequest)
+		return
+	}
+	forks, err := a.linkage.Forks(ps)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
@@ -279,16 +286,28 @@ func (a *API) forks(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// activaForks returns the combined info about forks for all ever connected peers.
-func (a *API) activeForks(w http.ResponseWriter, _ *http.Request) {
+// activeForks returns the combined info about forks for all ever connected peers.
+func (a *API) activeForks(w http.ResponseWriter, r *http.Request) {
+	rps, err := getPeers(r)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusBadRequest)
+		return
+	}
 	connections, err := a.registry.Connections()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to complete request: %v", err), http.StatusInternalServerError)
 		return
 	}
-	ps := make([]netip.Addr, len(connections))
-	for i, conn := range connections {
-		ps[i] = conn.ID()
+	size := len(connections)
+	if s := len(rps); s > 0 {
+		size = min(size, s)
+	}
+	ps := make([]netip.Addr, 0, size)
+	for _, conn := range connections {
+		if len(rps) > 0 && !slices.Contains(rps, conn.ID()) {
+			continue
+		}
+		ps = append(ps, conn.ID())
 	}
 	forks, err := a.linkage.Forks(ps)
 	if err != nil {
@@ -379,4 +398,21 @@ func (a *API) forkGenerators(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to marshal to JSON: %v", err), http.StatusInternalServerError)
 		return
 	}
+}
+
+func getPeers(r *http.Request) ([]netip.Addr, error) {
+	const peersParam = "peers"
+	ss := strings.Split(r.URL.Query().Get(peersParam), ",")
+	res := make([]netip.Addr, 0, len(ss))
+	for _, s := range ss {
+		s = strings.TrimSpace(s)
+		if len(s) > 0 {
+			p, err := netip.ParseAddr(strings.TrimSpace(s))
+			if err != nil {
+				return nil, fmt.Errorf("invalid peer: %w", err)
+			}
+			res = append(res, p)
+		}
+	}
+	return res, nil
 }
