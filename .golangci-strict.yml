@@ -29,8 +29,6 @@ linters-settings:
     # Such cases aren't reported by default.
     # Default: false
     check-type-assertions: true
-    # TODO: Remove the following line after updating golangci-lint to v1.58.3 or higher
-    ignore: ""
 
   exhaustive:
     # Program elements to check for exhaustiveness.
@@ -177,12 +175,6 @@ linters-settings:
     # Default: false
     all: true
 
-  # TODO: Remove the following lines after updating golangci-lint to v1.58.3 or higher
-  gosec:
-    excludes:
-      - G601
-      - G113
-
 linters:
   disable-all: true
   enable:
@@ -205,7 +197,6 @@ linters:
     - errname # checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error
     - errorlint # finds code that will cause problems with the error wrapping scheme introduced in Go 1.13
     - exhaustive # checks exhaustiveness of enum switch statements
-    - exportloopref # checks for pointers to enclosing loop variables
     - forbidigo # forbids identifiers
     - funlen # tool for detection of long functions
     - gocheckcompilerdirectives # validates go compiler directive comments (//go:)
@@ -251,6 +242,7 @@ linters:
     - usestdlibvars # detects the possibility to use variables/constants from the Go standard library
     - wastedassign # finds wasted assignment statements
     - whitespace # detects leading and trailing whitespace
+    - copyloopvar # detects places where loop variables are copied
 
     ## you may want to enable
     #- decorder # checks declaration order and count of types, constants, variables and functions
@@ -297,7 +289,6 @@ linters:
     #- interfacer # [deprecated] suggests narrower interface types
     #- maligned # [deprecated, replaced by govet fieldalignment] detects Go structs that would take less memory if their fields were sorted
     #- nosnakecase # [deprecated, replaced by revive var-naming] detects snake case of variable naming and function name
-    #- scopelint # [deprecated, replaced by exportloopref] checks for unpinned variables in go programs
     #- structcheck # [deprecated, replaced by unused] finds unused struct fields
     #- varcheck # [deprecated, replaced by unused] finds unused global variables and constants
 
@@ -309,9 +300,6 @@ issues:
   max-same-issues: 50
 
   exclude-rules:
-    # Disable linters that are annoying in tests.
-    - path: _string\.go
-      linters: [ gochecknoglobals ]
     - source: "(noinspection|TODO)"
       linters: [ godot ]
     - source: "//noinspection"
