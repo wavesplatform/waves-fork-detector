@@ -403,16 +403,20 @@ func (a *API) forkGenerators(w http.ResponseWriter, r *http.Request) {
 func getPeers(r *http.Request) ([]netip.Addr, error) {
 	const peersParam = "peers"
 	ss := strings.Split(r.URL.Query().Get(peersParam), ",")
-	res := make([]netip.Addr, 0, len(ss))
+	m := make(map[netip.Addr]struct{}, len(ss))
 	for _, s := range ss {
 		s = strings.TrimSpace(s)
 		if len(s) > 0 {
-			p, err := netip.ParseAddr(strings.TrimSpace(s))
+			p, err := netip.ParseAddr(s)
 			if err != nil {
-				return nil, fmt.Errorf("invalid peer: %w", err)
+				return nil, fmt.Errorf("invalid peer %q: %w", s, err)
 			}
-			res = append(res, p)
+			m[p] = struct{}{}
 		}
+	}
+	res := make([]netip.Addr, 0, len(m))
+	for k := range m {
+		res = append(res, k)
 	}
 	return res, nil
 }
