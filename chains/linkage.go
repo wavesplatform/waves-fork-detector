@@ -327,7 +327,9 @@ func (l *Linkage) LCB(peer netip.Addr) (proto.BlockID, error) {
 	return lca, nil
 }
 
-func (l *Linkage) Forks(peers []netip.Addr) ([]Fork, error) {
+type LookupPeers map[netip.Addr]struct{}
+
+func (l *Linkage) Forks(peers LookupPeers) ([]Fork, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -488,15 +490,15 @@ func safeTimestamp(ts uint64) int64 {
 	panic("timestamp is too large")
 }
 
-func (l *Linkage) forks(peers []netip.Addr) ([]Fork, error) {
+func (l *Linkage) forks(peers LookupPeers) ([]Fork, error) {
 	leashes, err := l.st.leashes()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get forks: %w", err)
 	}
 	m := make(map[proto.BlockID][]netip.Addr)
 	for _, lsh := range leashes {
-		if len(peers) > 0 && !slices.Contains(peers, lsh.Addr) {
-			continue // Skip leash if the peer is not in the list.
+		if _, ok := peers[lsh.Addr]; len(peers) > 0 && !ok {
+			continue // Skip leash if the peer is not in the map, but only for non-empty peers.
 		}
 		m[lsh.BlockID] = append(m[lsh.BlockID], lsh.Addr)
 	}

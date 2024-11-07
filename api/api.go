@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/netip"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -302,12 +301,12 @@ func (a *API) activeForks(w http.ResponseWriter, r *http.Request) {
 	if s := len(rps); s > 0 {
 		size = min(size, s)
 	}
-	ps := make([]netip.Addr, 0, size)
+	ps := make(map[netip.Addr]struct{}, size)
 	for _, conn := range connections {
-		if len(rps) > 0 && !slices.Contains(rps, conn.ID()) {
+		if _, ok := rps[conn.ID()]; len(rps) > 0 && !ok {
 			continue
 		}
-		ps = append(ps, conn.ID())
+		ps[conn.ID()] = struct{}{}
 	}
 	forks, err := a.linkage.Forks(ps)
 	if err != nil {
@@ -400,7 +399,7 @@ func (a *API) forkGenerators(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getPeers(r *http.Request) ([]netip.Addr, error) {
+func getPeers(r *http.Request) (map[netip.Addr]struct{}, error) {
 	const peersParam = "peers"
 	ss := strings.Split(r.URL.Query().Get(peersParam), ",")
 	m := make(map[netip.Addr]struct{}, len(ss))
@@ -414,9 +413,5 @@ func getPeers(r *http.Request) ([]netip.Addr, error) {
 			m[p] = struct{}{}
 		}
 	}
-	res := make([]netip.Addr, 0, len(m))
-	for k := range m {
-		res = append(res, k)
-	}
-	return res, nil
+	return m, nil
 }
