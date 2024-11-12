@@ -29,6 +29,10 @@ On the first run, Fork Detector builds the graph of blocks starting from the Gen
 
 Fork Detector supports only IPv4 addresses. This limitation exists due to the Waves network protocol, which exclusively uses IPv4 addresses when exchanging information about nodes.
 
+### Multiple nodes on the same IP address
+
+Fork Detector distinguishes nodes solely by their IP addresses. If multiple nodes are running on the same IP address, Fork Detector will be unable to differentiate between them and will only support a connection to one of them, with no guarantee as to which one.
+
 ### Version selection
 
 One must provide a list of protocol versions supported by Fork Detector. Connecting to nodes with different versions allows the detection of alternative chains that may arise due to lag or the inability of some generators to update during a Waves network upgrade.
