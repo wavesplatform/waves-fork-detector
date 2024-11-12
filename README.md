@@ -25,6 +25,10 @@ For every node that has ever connected, there is a link to the last block receiv
 
 On the first run, Fork Detector builds the graph of blocks starting from the Genesis block in the same way as a node does. During the initial graph build, the number of alternative chains is minimal.
 
+### Supported IP address versions
+
+Fork Detector supports only IPv4 addresses. This limitation exists due to the Waves network protocol, which exclusively uses IPv4 addresses when exchanging information about nodes.
+
 ### Version selection
 
 One must provide a list of protocol versions supported by Fork Detector. Connecting to nodes with different versions allows the detection of alternative chains that may arise due to lag or the inability of some generators to update during a Waves network upgrade.
@@ -61,7 +65,7 @@ Reply fields:
     * `1` `Connected` - successful connection was made, and the network byte and version are acceptable.
     * `2` `Hostile` - successful connection was established, but the network byte or version is not acceptable.
 * `next_attempt` - time when the next attempt to connect to the node is planned. This field is used during version selection (see the section [Version Selection](#version-selection)).
-* `score` - last known value of the Score; zero if there was no connection.
+* `score` - last known value of the Score; `null` value if there was no connection.
 
 ### `GET` `/api/peers/friendly`
 
@@ -178,8 +182,8 @@ Reply example:
 
 Reply fields:
 * `version` — the version of Fork Detector.
-* `short_forks_count` — the number of alternative chains with a length of fewer than 10 blocks.
-* `long_forks_count` — the number of alternative chains with a length of more than 10 blocks.
+* `short_forks_count` — the number of alternative chains with a length of fewer than 5 blocks.
+* `long_forks_count` — the number of alternative chains with a length of more or equal than 5 blocks.
 * `all_peers_count` — the number of known nodes.
 * `friendly_peers_count` — the number of successfully connected nodes.
 * `connected_peers_count` — the number of ongoing connections.
@@ -191,6 +195,11 @@ The method returns the list of all chains. A chain is returned if at least one n
 
 Request parameters:
 * `peers` — a comma-separated list of node addresses. The reply will contain only information for the listed nodes. If the list is empty or the parameter is missing, all chains will be returned.
+
+Request example:
+```bash
+curl -X GET "http://127.0.0.1:8080/api/forks?peers=78.46.193.104,78.46.163.61,135.181.47.20,88.99.139.9"
+```
 
 Reply example:
 ```json
@@ -231,6 +240,11 @@ The method returns a list of chains linked to the currently connected nodes.
 Request parameters:
 * `peers` — a comma-separated list of node addresses. The reply will contain only information for the listed nodes. If the list is empty or the parameter is missing, all chains will be returned.
 
+Request example:
+```bash
+curl -X GET "http://127.0.0.1:8080/api/active-forks?peers=78.46.193.104,78.46.163.61,135.181.47.20,88.99.139.9"
+```
+
 Reply example:
 ```json
 [
@@ -257,6 +271,11 @@ Reply fields are the same as those for the method [GET /api/forks](#get-apiforks
 
 The method returns information about the chain linked to the given node. This method is useful for quickly checking the node’s fork.
 
+Request example:
+```bash
+curl -X GET "http://127.0.0.1:8080/api/fork/78.46.193.104"
+```
+
 Reply example:
 ```json
 {
@@ -282,6 +301,11 @@ Reply fields are the same as those for the method [GET /api/forks](#get-apiforks
 ### `GET` `/api/forks/{address}/generators/{blocks}`
 
 The method returns an aggregated list of generator addresses for the chain of the given node and for the specified number of the most recent blocks.
+
+Request example:
+```bash
+curl -X GET "http://127.0.0.1:8080/api/fork/45.33.22.96/generators/10"
+````
 
 Reply example:
 ```json
@@ -351,3 +375,4 @@ make dist
 ```
 
 The build result will be located in the `build/dist `directory as an archive with a name in the format `forkdetector_v{X.Y.Z}_{OS}_{ARCH}.[tar.gz|zip]`.
+For now, the following operating systems are supported: `Linux`, `macOS`, and `Windows`. The `amd64` and `arm64` architectures are supported for `Linux` and `macOS`, while only the `amd64` architecture is supported for `Windows`.
