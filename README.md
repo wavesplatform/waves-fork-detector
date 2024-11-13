@@ -40,6 +40,8 @@ When establishing an outgoing connection to a new node, Fork Detector attempts t
 
 ## HTTP API Methods
 
+Full API documentation in the OpenAPI format is available at the `/api/` endpoint with Swagger UI.
+
 ### `GET` `/api/peers/all`
 
 The method returns a list of addresses of all known nodes. These addresses were received from other nodes during the known node exchange, but a connection to all of them is not guaranteed.
