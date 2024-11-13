@@ -3,9 +3,11 @@ package api
 import (
 	"compress/flate"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/netip"
 	"runtime"
@@ -26,6 +28,11 @@ import (
 )
 
 const defaultTimeout = 30 * time.Second
+
+var (
+	//go:embed swagger
+	res embed.FS
+)
 
 // Logger is a middleware that logs the start and end of each request, along
 // with some useful data about what was requested, what the response status was,
@@ -65,15 +72,20 @@ func NewAPI(registry *peers.Registry, linkage *chains.Linkage, bind string) (*AP
 	if bind == "" {
 		return nil, errors.New("empty address to bin")
 	}
+	swaggerFS, err := fs.Sub(res, "swagger")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get swagger FS: %w", err)
+	}
+
 	a := API{registry: registry, linkage: linkage}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(Logger(zap.L()))
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.SetHeader("Content-Type", "application/json"))
 	r.Use(middleware.Compress(flate.DefaultCompression))
-	r.Mount("/api", a.routes())
+	const apiRoot = "/api"
+	r.Mount(apiRoot, a.routes(apiRoot, swaggerFS))
 	a.srv = &http.Server{Addr: bind, Handler: r, ReadHeaderTimeout: defaultTimeout, ReadTimeout: defaultTimeout}
 	return &a, nil
 }
@@ -105,18 +117,23 @@ func (a *API) runServer() error {
 	return nil
 }
 
-func (a *API) routes() chi.Router {
+func (a *API) routes(rootMountPath string, swaggerFS fs.FS) chi.Router {
 	r := chi.NewRouter()
-	r.Get("/peers/all", a.peers)
-	r.Get("/peers/friendly", a.friendly)
-	r.Get("/connections", a.connections)
-	r.Get("/heads", a.heads)
-	r.Get("/leashes", a.leashes)
-	r.Get("/status", a.status)
-	r.Get("/forks", a.forks)
-	r.Get("/active-forks", a.activeForks)
-	r.Get("/fork/{address}", a.fork)
-	r.Get("/fork/{address}/generators/{blocks}", a.forkGenerators)
+	swaggerUI := http.StripPrefix(rootMountPath, http.FileServer(http.FS(swaggerFS)))
+	r.Mount("/", swaggerUI)      // swagger UI weil be served at the rootMountPath + ("/index.html" or "/")
+	r.Group(func(r chi.Router) { // API routes
+		r.Use(middleware.SetHeader("Content-Type", "application/json"))
+		r.Get("/peers/all", a.peers)
+		r.Get("/peers/friendly", a.friendly)
+		r.Get("/connections", a.connections)
+		r.Get("/heads", a.heads)
+		r.Get("/leashes", a.leashes)
+		r.Get("/status", a.status)
+		r.Get("/forks", a.forks)
+		r.Get("/active-forks", a.activeForks)
+		r.Get("/fork/{address}", a.fork)
+		r.Get("/fork/{address}/generators/{blocks}", a.forkGenerators)
+	})
 	return r
 }
 
