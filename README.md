@@ -362,9 +362,10 @@ forkdetector -db [path_to_db] -peers [IP:PORT,...,IP:PORT]
 This command will start Fork Detector to work with the `MainNet` network in outgoing-only connection mode, with the local API available on port `8080`.
 
 Available command-line parameters:
+* `-db` - path to the directory where the database will be stored. **This parameter is required.**
 * `-log-level` - logging level, default is `INFO`. Other possible values: `DEBUG`, `INFO`, `WARN`, `ERROR`, and `FATAL`.
 * `-blockchain-type` - network type, available values are `mainnet`, `testnet`, and `stagenet`. Default is `mainnet`.
-* `-peers` - a comma-separated list of node addresses to initially connect to in the format `ip:port,...,ip:port`. This parameter is required.
+* `-peers` - a comma-separated list of node addresses to initially connect to in the format `ip:port,...,ip:port`. **This parameter is required.**
 * `-api` - the address at which the Fork Detector API will be available. The default is `localhost:8080`, meaning the API will be available locally on port `8080`.
 * `-net` - the address at which the network interface for node connections will be available. The default is `localhost:6868`, meaning only local connections are allowed. To allow external connections, use `0.0.0.0:6868`.
 * `-declared-address` - the address declared by Fork Detector for node connections. By default, this value is not set, and external connections are not available. The specified address must be a public IP of the server, and the port must match the value in the `-net` parameter.
