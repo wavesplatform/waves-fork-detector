@@ -1,0 +1,393 @@
+openapi: 3.1.0
+info:
+  title: Waves Fork Detector API
+  version: "0.3.3"
+  description: API for the Waves Fork Detector, a service to register forks in the Waves network.
+servers:
+  - url: /
+
+paths:
+  /api/peers/all:
+    get:
+      summary: Retrieve all known nodes.
+      description: |-
+        The method returns a list of addresses of all known nodes.
+        These addresses were received from other nodes during the known node exchange,
+        but a connection to all of them is not guaranteed.
+      responses:
+        '200':
+          description: A list of all known nodes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Peer'
+
+  /api/peers/friendly:
+    get:
+      summary: Retrieve friendly nodes.
+      description: |-
+        The method returns a list of node addresses to which
+        a successful connection was established (`state` has a value of `1`).
+        The list may include addresses where a successful connection was made in the past
+        but is no longer possible.
+      responses:
+        '200':
+          description: A list of friendly nodes (state = 1).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Peer'
+
+  /api/connections:
+    get:
+      summary: Retrieve currently connected nodes.
+      description: |-
+        The method returns a list of addresses of nodes that are connected at the time of the request.
+      responses:
+        '200':
+          description: A list of currently connected nodes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Peer'
+
+  /api/heads:
+    get:
+      summary: Retrieve all chain heads.
+      description: |-
+        A service method that returns the list of `heads` of all chains.
+      responses:
+        '200':
+          description: A list of chain heads.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Head'
+
+  /api/leashes:
+    get:
+      summary: Retrieve node leashes to last blocks.
+      description: |-
+        A service method that returns the list of `leashes` that link nodes to their last blocks
+      responses:
+        '200':
+          description: A list of node leashes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Leash'
+
+  /api/status:
+    get:
+      summary: Retrieve service status.
+      description: |-
+        The method provides brief information about the Fork Detector service.
+      responses:
+        '200':
+          description: Fork Detector status information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+
+  /api/forks:
+    get:
+      summary: Retrieve all chains.
+      description: |-
+        The method returns the list of all chains.
+        A chain is returned if at least one node is pointing to it.
+        The list may contain chains that are no longer active.
+      parameters:
+        - name: peers
+          in: query
+          schema:
+            type: string
+            pattern: ^((\d{1,3}\.){3}\d{1,3})(,(\d{1,3}\.){3}\d{1,3})*$
+          description: Comma-separated list of node addresses.
+      responses:
+        '200':
+          description: A list of chains.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Fork'
+
+  /api/active-forks:
+    get:
+      summary: Retrieve active chains for connected nodes.
+      description: |-
+        The method returns a list of chains linked to the currently connected nodes.
+      parameters:
+        - name: peers
+          in: query
+          schema:
+            type: string
+            pattern: ^((\d{1,3}\.){3}\d{1,3})(,(\d{1,3}\.){3}\d{1,3})*$
+          description: Comma-separated list of node addresses.
+      responses:
+        '200':
+          description: A list of active chains.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Fork'
+
+  /api/fork/{address}:
+    get:
+      summary: Retrieve chain for a specific node.
+      description: |-
+        The method returns information about the chain linked to the given node.
+        This method is useful for quickly checking the node’s fork.
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: ^((\d{1,3}\.){3}\d{1,3})?$
+          description: Node address.
+      responses:
+        '200':
+          description: Chain information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fork'
+
+  /api/forks/{address}/generators/{blocks}:
+    get:
+      summary: Retrieve generator addresses.
+      description: |-
+        The method returns an aggregated list of generator addresses for the chain
+        of the given node and for the specified number of the most recent blocks.
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: ^((\d{1,3}\.){3}\d{1,3})?$
+          description: Node address.
+        - name: blocks
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Number of blocks to retrieve generators for.
+      responses:
+        '200':
+          description: List of generators.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    generator:
+                      type: string
+                      example: "3PQ9hZ36dyXGcqabcrHXsjP9PaQMqy69yeE"
+                      description: Address of the generator.
+                    blocks:
+                      type: integer
+                      example: 4
+                      description: Number of blocks created by the generator.
+
+components:
+  schemas:
+    Peer:
+      type: object
+      properties:
+        address:
+          type: string
+          example: "79.199.35.153:0"
+          description: |-
+            IP address and port of the node.
+            The port has a zero value in case of an incoming connection (node on an ephemeral port) or if no connection was established.
+        nonce:
+          type: integer
+          example: 0
+          description: Random nonce; zero if no connection was made.
+        name:
+          type: string
+          example: ""
+          description: Node name; empty string if no connection was made.
+        version:
+          type: string
+          example: "0.0.0"
+          description: Node version; zero if no connection was established.
+        state:
+          type: integer
+          example: 0
+          enum:
+            - 0
+            - 1
+            - 2
+          description: |-
+            State of the connection. Possible values:
+            - `0` (_Unknown_) - unknown node, no successful connection was made to the address;
+            - `1` (_Connected_) - successful connection was made, and the network byte and version are acceptable;
+            - `2` (_Hostile_) - successful connection was established, but the network byte or version is not acceptable.
+        next_attempt:
+          type: string
+          format: date-time
+          example: "0001-01-01T00:00:00Z"
+          description: Next connection attempt time. This field is used during version selection.
+        score:
+          type: integer
+          nullable: true
+          example: null
+          description: Last known Score value; `null` if there was no connection.
+
+    Head:
+      type: object
+      properties:
+        number:
+          type: integer
+          example: 59
+          description: Sequential number of the head.
+        id:
+          type: string
+          example: "4Seud85Bghk1pJxrK4wyW92zW2xTkCuaVpv9PNxnAyp4"
+          description: ID of the last block.
+        height:
+          type: integer
+          example: 4175639
+          description: Height of the last block.
+        score:
+          type: integer
+          example: 946311268021761697586482
+          description: Score of the chain.
+        timestamp:
+          type: string
+          format: date-time
+          example: "2022-11-12T11:44:01.043Z"
+          description: Timestamp of the last block.
+
+    Leash:
+      type: object
+      properties:
+        block_id:
+          type: string
+          example: "ApMd6i85Xmy2ppLADRwkMm7oDmrU2gswtcWwkDNdKnjt"
+          description: Block ID.
+        height:
+          type: integer
+          example: 4427078
+          description: Block height.
+        score:
+          type: integer
+          example: 967109273317885729102590
+          description: Score value for the chain up to the current block.
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-11-07T13:12:43.06Z"
+          description: Timestamp of the block.
+        generator:
+          type: string
+          example: "3PQ9hZ36dyXGcqabcrHXsjP9PaQMqy69yeE"
+          description: Address of block generator.
+        peers_count:
+          type: integer
+          example: 1
+          description: Number of nodes reporting the block.
+        peers:
+          type: array
+          items:
+            type: string
+            example: "52.203.105.100"
+          description: List of node addresses reporting the block.
+
+    Status:
+      type: object
+      properties:
+        version:
+          type: string
+          example: "v0.3.3-4-g475be2f"
+          description: Fork Detector version.
+        short_forks_count:
+          type: integer
+          example: 371
+          description: Count of short forks (chain length < 10).
+        long_forks_count:
+          type: integer
+          example: 76
+          description: Count of long forks (chain length > 10).
+        all_peers_count:
+          type: integer
+          example: 1993
+          description: Count of all known peers.
+        friendly_peers_count:
+          type: integer
+          example: 737
+          description: Count of friendly peers.
+        connected_peers_count:
+          type: integer
+          example: 156
+          description: Count of currently connected peers.
+        goroutines_count:
+          type: integer
+          example: 579
+          description: Count of goroutines.
+
+    Fork:
+      type: object
+      properties:
+        longest:
+          type: boolean
+          example: false
+          description: Indicates if this is the longest chain.
+        head_block:
+          type: string
+          example: "6i1F61esPX8Gbyhs14Df39e1ewS5CnnLJVkehjg7D4aA"
+          description: ID of the last block in the chain.
+        head_timestamp:
+          type: string
+          format: date-time
+          example: "2024-11-07T17:48:58.065Z"
+          description: Timestamp of the last block creation.
+        head_generator:
+          type: string
+          example: "3PA1KvFfq9VuJjg45p2ytGgaNjrgnLSgf4r"
+          description: Address of the generator of the last block.
+        head_height:
+          type: integer
+          example: 4427350
+          description: Height of the last block in the chain.
+        score:
+          type: integer
+          example: 967130510550401075525343
+          description: Calculated Score for the chain.
+        peers_count:
+          type: integer
+          example: 1
+          description: Number of nodes on the chain.
+        peers:
+          type: array
+          items:
+            type: string
+            example: "209.145.51.189"
+          description: List of node addresses on the chain.
+        last_common_block:
+          type: string
+          example: "6i1F61esPX8Gbyhs14Df39e1ewS5CnnLJVkehjg7D4aA"
+          description: ID of the last common block with the main chain.
+        length:
+          type: integer
+          example: 0
+          description: Length of the chain since it diverged from the main chain.
