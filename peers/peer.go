@@ -72,7 +72,7 @@ func (p *Peer) RequestBlockIDs(ids []proto.BlockID) {
 	} else {
 		zap.S().Debugf("[%s] Requesting blocks IDs for IDs range [%s...%s]",
 			p.p.ID().String(), ids[0].ShortString(), ids[len(ids)-1].ShortString())
-		p.p.SendMessage(&proto.GetBlockIdsMessage{Blocks: ids})
+		p.p.SendMessage(&proto.GetBlockIDsMessage{Blocks: ids})
 	}
 }
 
