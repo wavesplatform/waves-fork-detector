@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"math"
 	rand2 "math/rand/v2"
 	"net"
@@ -12,15 +13,15 @@ import (
 	"path"
 	"strings"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-
+	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 	"github.com/wavesplatform/gowaves/pkg/settings"
 )
 
 type parameters struct {
-	logLevel        zapcore.Level
+	lp              logging.Parameters
+	logNetwork      bool
+	logNetworkData  bool
 	dbPath          string
 	scheme          proto.Scheme
 	genesis         proto.Block
@@ -34,8 +35,12 @@ type parameters struct {
 }
 
 func newParameters() (*parameters, error) {
-	ll := zap.LevelFlag("log-level", zapcore.InfoLevel,
-		"Specify the logging level. Supported levels include: DEBUG, INFO, WARN, ERROR, and FATAL.")
+	lp := logging.Parameters{}
+	lp.Initialize()
+	flagLogNetwork := flag.Bool("log-network", false,
+		"Log the operation of network stack. Turned off by default.")
+	flagLogNetworkData := flag.Bool("log-network-data", false,
+		"Log network messages as Base64 strings. Turned off by default.")
 	flagDB := flag.String("db", "",
 		"Specify the path to the database folder. There is no default value. Please, provide one.")
 	flagBlockchainType := flag.String("blockchain-type", "mainnet",
@@ -55,6 +60,9 @@ func newParameters() (*parameters, error) {
 		"Specify a comma-separated list of acceptable protocol versions. "+
 			"By default, the two most recent versions are accepted.")
 	flag.Parse()
+	if err := lp.Parse(); err != nil {
+		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
 	dbf, err := checkFolder(*flagDB)
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameters: invalid database folder: %w", err)
@@ -84,7 +92,9 @@ func newParameters() (*parameters, error) {
 		return nil, fmt.Errorf("invalid parameters: %w", err)
 	}
 	return &parameters{
-		logLevel:        *ll,
+		lp:              lp,
+		logNetwork:      *flagLogNetwork,
+		logNetworkData:  *flagLogNetworkData,
 		dbPath:          dbf,
 		scheme:          bs.AddressSchemeCharacter,
 		genesis:         bs.Genesis,
@@ -99,17 +109,20 @@ func newParameters() (*parameters, error) {
 }
 
 func (p *parameters) log() {
-	zap.S().Debugf("Configuration parameters:")
-	zap.S().Debugf("\tlogLevel: %s", p.logLevel)
-	zap.S().Debugf("\tdbPath: %s", p.dbPath)
-	zap.S().Debugf("\tscheme: %c", p.scheme)
-	zap.S().Debugf("\tgenesis: %s", p.genesis.BlockID().String())
-	zap.S().Debugf("\tseedPeers: %v", p.seedPeers)
-	zap.S().Debugf("\tapiBind: %s", p.apiBind)
-	zap.S().Debugf("\tnetBind: %s", p.netBind)
-	zap.S().Debugf("\tdeclaredAddress: %s", p.declaredAddress)
-	zap.S().Debugf("\tname: %s", p.name)
-	zap.S().Debugf("\tversions: %s", p.versions)
+	slog.Debug("Configuration parameters",
+		slog.String("logging", p.lp.String()),
+		slog.Bool("logNetwork", p.logNetwork),
+		slog.Bool("logNetworkData", p.logNetworkData),
+		slog.String("dbPath", p.dbPath),
+		slog.String("scheme", string(rune(p.scheme))),
+		slog.String("genesis", p.genesis.BlockID().String()),
+		slog.Any("seedPeers", p.seedPeers),
+		slog.String("apiBind", p.apiBind),
+		slog.String("netBind", p.netBind.String()),
+		slog.String("declaredAddress", p.declaredAddress.String()),
+		slog.String("name", p.name),
+		slog.Any("versions", p.versions),
+	)
 }
 
 func parseSeedPeers(seedPeers string, blockchainType settings.BlockchainType) ([]*net.TCPAddr, error) {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewQueue(t *testing.T) {
-	bl1 := createNthBlock(t, settings.TestNetSettings.Genesis.BlockID(), 1)
+	bl1 := createNthBlock(t, settings.MustTestNetSettings().Genesis.BlockID(), 1)
 	bl2 := createNthBlock(t, bl1.BlockID(), 2)
 	bl3 := createNthBlock(t, bl2.BlockID(), 3)
 	ids := []proto.BlockID{bl1.BlockID(), bl2.BlockID(), bl3.BlockID()}
@@ -24,7 +24,7 @@ func TestNewQueue(t *testing.T) {
 }
 
 func TestQueuePutAndLastReceived(t *testing.T) {
-	bl1 := createNthBlock(t, settings.TestNetSettings.Genesis.BlockID(), 1)
+	bl1 := createNthBlock(t, settings.MustTestNetSettings().Genesis.BlockID(), 1)
 	bl2 := createNthBlock(t, bl1.BlockID(), 2)
 	bl3 := createNthBlock(t, bl2.BlockID(), 3)
 	fake := createNthBlock(t, bl3.BlockID(), 4)
@@ -61,7 +61,7 @@ func TestQueuePutAndLastReceived(t *testing.T) {
 }
 
 func TestReady(t *testing.T) {
-	bl1 := createNthBlock(t, settings.TestNetSettings.Genesis.BlockID(), 1)
+	bl1 := createNthBlock(t, settings.MustTestNetSettings().Genesis.BlockID(), 1)
 	bl2 := createNthBlock(t, bl1.BlockID(), 2)
 	bl3 := createNthBlock(t, bl2.BlockID(), 3)
 	fake := createNthBlock(t, bl3.BlockID(), 4)
@@ -79,7 +79,7 @@ func TestReady(t *testing.T) {
 }
 
 func TestRangeString(t *testing.T) {
-	bl1 := createNthBlock(t, settings.TestNetSettings.Genesis.BlockID(), 1)
+	bl1 := createNthBlock(t, settings.MustTestNetSettings().Genesis.BlockID(), 1)
 	bl2 := createNthBlock(t, bl1.BlockID(), 2)
 	bl3 := createNthBlock(t, bl2.BlockID(), 3)
 	ids := []proto.BlockID{bl1.BlockID(), bl2.BlockID(), bl3.BlockID()}

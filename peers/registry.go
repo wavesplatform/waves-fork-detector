@@ -3,6 +3,7 @@ package peers
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/netip"
@@ -11,8 +12,8 @@ import (
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
-	"go.uber.org/zap"
 
+	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 )
@@ -30,10 +31,12 @@ type Registry struct {
 	mu          sync.Mutex
 	connections map[netip.Addr]peer.Peer
 	pending     map[netip.Addr]struct{}
+
+	logger *slog.Logger
 }
 
 func NewRegistry(
-	scheme proto.Scheme, declared proto.TCPAddr, versions []proto.Version, path string,
+	scheme proto.Scheme, declared proto.TCPAddr, versions []proto.Version, path string, logger *slog.Logger,
 ) (*Registry, error) {
 	s, err := newStorage(path)
 	if err != nil {
@@ -53,6 +56,7 @@ func NewRegistry(
 		storage:     s,
 		connections: make(map[netip.Addr]peer.Peer),
 		pending:     make(map[netip.Addr]struct{}),
+		logger:      logger,
 	}, nil
 }
 
@@ -104,7 +108,7 @@ func (r *Registry) RegisterPeer(addr netip.Addr, np peer.Peer, handshake proto.H
 		return r.storage.putPeer(p)
 	}
 
-	port, err := checkPort(addr, np, handshake)
+	port, err := r.checkPort(addr, np, handshake)
 	if err != nil {
 		return err
 	}
@@ -133,7 +137,7 @@ func (r *Registry) UpdatePeerScore(addr netip.Addr, score *big.Int) error {
 	return r.storage.putPeer(p)
 }
 
-func checkPort(addr netip.Addr, np peer.Peer, handshake proto.Handshake) (uint16, error) {
+func (r *Registry) checkPort(addr netip.Addr, np peer.Peer, handshake proto.Handshake) (uint16, error) {
 	port := uint16(0)
 	if !handshake.DeclaredAddr.Empty() {
 		ha, pErr := netip.ParseAddrPort(handshake.DeclaredAddr.String())
@@ -150,7 +154,8 @@ func checkPort(addr netip.Addr, np peer.Peer, handshake proto.Handshake) (uint16
 			return 0, fmt.Errorf("failed to register peer: declared address is not IPv4: '%s'", ha.String())
 		}
 		if ha.Addr().Compare(addr) != 0 {
-			zap.S().Warnf("Declared address '%s' does not match actual remote address '%s'", ha.String(), addr.String())
+			r.logger.Warn("Declared address does not match actual remote address", slog.String("declared", ha.String()),
+				slog.String("remote", addr.String()))
 			port = 0
 		}
 	}
@@ -164,7 +169,7 @@ func (r *Registry) UnregisterPeer(addr netip.Addr) error {
 	p, err := r.storage.peer(addr)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			zap.S().Warnf("Attempt to unregister unknown peer '%s'", addr.String())
+			r.logger.Warn("Attempt to unregister unknown peer", slog.String("peer", addr.String()))
 		}
 		return fmt.Errorf("failed to unregister peer '%s': %w", addr.String(), err)
 	}
@@ -214,6 +219,7 @@ func (r *Registry) Connections() ([]Peer, error) {
 			return nil, fmt.Errorf("failed to get active connetcions: %w", err)
 		}
 		sp.p = p
+		sp.logger = r.logger.With(slog.String("peer", a.String()))
 		connections[i] = sp
 		i++
 	}
@@ -231,24 +237,24 @@ func (r *Registry) AppendAddresses(addresses []*net.TCPAddr) int {
 	for i := range addresses {
 		ap, err := netip.ParseAddrPort(addresses[i].String())
 		if err != nil {
-			zap.S().Debugf("Error adding address: %v", err)
+			r.logger.Debug("Error adding address", logging.Error(err))
 			continue
 		}
 		if !ap.Addr().Is4() {
-			zap.S().Debugf("[REG] Skipping non-IPv4 address: %s", ap.String())
+			r.logger.Debug("Skipping non-IPv4 address", slog.String("address", ap.String()))
 			continue
 		}
 		if ap.Addr().IsLoopback() {
-			zap.S().Debugf("[REG] Skipping loopback address: %s", ap.String())
+			r.logger.Debug("Skipping loopback address", slog.String("address", ap.String()))
 			continue
 		}
 		if ap.Addr().Compare(r.declared) == 0 {
-			zap.S().Debugf("[REG] Skipping self address: %s", ap.String())
+			r.logger.Debug("Skipping self address", slog.String("address", ap.String()))
 			continue
 		}
 		yes, err := r.storage.hasPeer(ap.Addr())
 		if err != nil {
-			zap.S().Debugf("[REG] Failed to append addresses: %v", err)
+			r.logger.Debug("Failed to append addresses", logging.Error(err))
 			return count
 		}
 		if !yes {
@@ -257,7 +263,7 @@ func (r *Registry) AppendAddresses(addresses []*net.TCPAddr) int {
 				State:       PeerUnknown,
 			}
 			if putErr := r.storage.putPeer(p); putErr != nil {
-				zap.S().Warnf("Failed to append addresses: %v", putErr)
+				r.logger.Warn("Failed to append addresses", logging.Error(putErr))
 				return count
 			}
 			count++
@@ -326,7 +332,8 @@ func (r *Registry) TakeAvailableAddresses() ([]netip.AddrPort, error) {
 	if err != nil {
 		return addresses, fmt.Errorf("failed to get available addresses from storage: %w", err)
 	}
-	zap.S().Debugf("[REG] Getting available addresses: pending %d, connected %d", len(r.pending), len(r.connections))
+	r.logger.Debug("Getting available addresses", slog.Int("pending", len(r.pending)),
+		slog.Int("connected", len(r.connections)))
 	for _, p := range peers {
 		if p.State == PeerHostile {
 			continue

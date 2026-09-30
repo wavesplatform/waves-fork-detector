@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/netip"
+	"os"
 	"runtime"
 	"sort"
 	"strconv"
@@ -18,8 +20,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/proto"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/alexeykiselev/waves-fork-detector/chains"
@@ -37,7 +39,7 @@ var (
 // Logger is a middleware that logs the start and end of each request, along
 // with some useful data about what was requested, what the response status was,
 // and how long it took to return.
-func Logger(l *zap.Logger) func(next http.Handler) http.Handler {
+func Logger(l *slog.Logger) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
@@ -45,13 +47,13 @@ func Logger(l *zap.Logger) func(next http.Handler) http.Handler {
 			t1 := time.Now()
 			defer func() {
 				l.Debug("Served",
-					zap.String("proto", r.Proto),
-					zap.String("path", r.URL.Path),
-					zap.String("remote", r.RemoteAddr),
-					zap.Duration("lat", time.Since(t1)),
-					zap.Int("status", ww.Status()),
-					zap.Int("size", ww.BytesWritten()),
-					zap.String("reqId", middleware.GetReqID(r.Context())))
+					slog.String("proto", r.Proto),
+					slog.String("path", r.URL.Path),
+					slog.String("remote", r.RemoteAddr),
+					slog.Duration("lat", time.Since(t1)),
+					slog.Int("status", ww.Status()),
+					slog.Int("size", ww.BytesWritten()),
+					slog.String("reqId", middleware.GetReqID(r.Context())))
 			}()
 
 			next.ServeHTTP(ww, r)
@@ -66,9 +68,12 @@ type API struct {
 	registry *peers.Registry
 	linkage  *chains.Linkage
 	srv      *http.Server
+	logger   *slog.Logger
 }
 
-func NewAPI(registry *peers.Registry, linkage *chains.Linkage, bind string) (*API, error) {
+func NewAPI(
+	registry *peers.Registry, linkage *chains.Linkage, bind string, logger *slog.Logger,
+) (*API, error) {
 	if bind == "" {
 		return nil, errors.New("empty address to bin")
 	}
@@ -77,11 +82,10 @@ func NewAPI(registry *peers.Registry, linkage *chains.Linkage, bind string) (*AP
 		return nil, fmt.Errorf("failed to get swagger FS: %w", err)
 	}
 
-	a := API{registry: registry, linkage: linkage}
+	a := API{registry: registry, linkage: linkage, logger: logger}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(Logger(zap.L()))
+	r.Use(Logger(logger))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(flate.DefaultCompression))
 	const apiRoot = "/api"
@@ -100,19 +104,19 @@ func (a *API) Run(ctx context.Context) {
 
 func (a *API) Shutdown() {
 	if err := a.srv.Shutdown(a.ctx); err != nil && !errors.Is(err, context.Canceled) {
-		zap.S().Errorf("Failed to shutdown API: %v", err)
+		a.logger.Error("Failed to shutdown API", logging.Error(err))
 	}
 	if err := a.wait(); err != nil {
-		zap.S().Warnf("Failed to shutdown API: %v", err)
+		a.logger.Warn("Failed to shutdown API", logging.Error(err))
 	}
-	zap.S().Info("API shutdown successfully")
+	a.logger.Info("API shutdown successfully")
 }
 
 func (a *API) runServer() error {
 	err := a.srv.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		zap.S().Fatalf("Failed to start API: %v", err)
-		return err
+		a.logger.Error("Failed to start API", logging.Error(err))
+		os.Exit(1)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package chains
 
 import (
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"testing"
 
@@ -259,8 +260,8 @@ func TestLastBlockIDs(t *testing.T) {
 }
 
 func createTestLinkageAndGenesisID(t testing.TB) (*Linkage, proto.BlockID) {
-	genesis := settings.TestNetSettings.Genesis
-	dr, err := NewLinkage(t.TempDir(), proto.TestNetScheme, genesis)
+	genesis := settings.MustTestNetSettings().Genesis
+	dr, err := NewLinkage(t.TempDir(), proto.TestNetScheme, genesis, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	return dr, genesis.BlockID()
 }

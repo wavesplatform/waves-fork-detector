@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/netip"
@@ -11,9 +12,9 @@ import (
 
 	"github.com/rhansen/go-kairos/kairos"
 	"github.com/wavesplatform/gowaves/pkg/crypto"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 
@@ -37,10 +38,12 @@ type Distributor struct {
 	blockCh chan loading.BlockPackage
 
 	timer *kairos.Timer
+
+	logger *slog.Logger
 }
 
 func NewDistributor(
-	scheme proto.Scheme, linkage *chains.Linkage, registry *peers.Registry, parent peer.Parent,
+	scheme proto.Scheme, linkage *chains.Linkage, registry *peers.Registry, parent peer.Parent, logger *slog.Logger,
 ) *Distributor {
 	idsCh := make(chan loading.IDsPackage)
 	blockCh := make(chan loading.BlockPackage)
@@ -52,6 +55,7 @@ func NewDistributor(
 		idsCh:    idsCh,
 		blockCh:  blockCh,
 		timer:    kairos.NewStoppedTimer(),
+		logger:   logger,
 	}
 }
 
@@ -66,11 +70,11 @@ func (d *Distributor) Run(ctx context.Context) {
 
 func (d *Distributor) Shutdown() {
 	if err := d.wait(); err != nil {
-		zap.S().Warnf("Failed to shutdown Distributor: %v", err)
+		d.logger.Warn("Failed to shutdown Distributor", logging.Error(err))
 	}
 	close(d.idsCh)
 	close(d.blockCh)
-	zap.S().Info("Distributor shutdown successfully")
+	d.logger.Info("Distributor shutdown successfully")
 }
 
 func (d *Distributor) IDsCh() <-chan loading.IDsPackage {
@@ -85,10 +89,10 @@ func (d *Distributor) runLoop() error {
 	for {
 		select {
 		case <-d.ctx.Done():
-			zap.S().Debugf("[DTR] Distributor shutdown in progress...")
+			d.logger.Debug("Distributor shutdown in progress...")
 			return nil
 		case <-d.timer.C:
-			zap.S().Info("Pinging connections")
+			d.logger.Info("Pinging connections")
 			d.pingConnections()
 			d.timer.Reset(pingInterval)
 		case infoMessage := <-d.parent.InfoCh:
@@ -115,11 +119,11 @@ func (d *Distributor) handleInfoMessage(msg peer.InfoMessage) {
 func (d *Distributor) handleConnected(cm *peer.Connected) {
 	ap, err := netip.ParseAddrPort(cm.Peer.RemoteAddr().String())
 	if err != nil {
-		zap.S().Warnf("Failed to parse address: %v", err)
+		d.logger.Warn("Failed to parse address", logging.Error(err))
 		return
 	}
 	if rpErr := d.registry.RegisterPeer(ap.Addr(), cm.Peer, cm.Peer.Handshake()); rpErr != nil {
-		zap.S().Warnf("Failed to check peer: %v", rpErr)
+		d.logger.Warn("Failed to check peer", logging.Error(rpErr))
 		return
 	}
 }
@@ -127,16 +131,16 @@ func (d *Distributor) handleConnected(cm *peer.Connected) {
 func (d *Distributor) handleInternalError(peer peer.Peer, ie *peer.InternalErr) {
 	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
 	if err != nil {
-		zap.S().Warnf("Failed to parse address: %v", err)
+		d.logger.Warn("Failed to parse address", logging.Error(err))
 		return
 	}
-	zap.S().Infof("[DTR] Closing connection with peer %s", ap.Addr().String())
-	zap.S().Debugf("[DTR] Peer %s failed with error: %v", ap.Addr().String(), ie.Err)
+	d.logger.Info("Closing connection with peer", slog.String("peer", ap.Addr().String()))
+	d.logger.Debug("Peer failed with error", slog.String("peer", ap.Addr().String()), logging.Error(ie.Err))
 	if clErr := peer.Close(); clErr != nil {
-		zap.S().Warnf("Failed to close peer '%s' connection: %v", ap.Addr().String(), clErr)
+		d.logger.Warn("Failed to close peer connection", slog.String("peer", ap.Addr().String()), logging.Error(clErr))
 	}
 	if urErr := d.registry.UnregisterPeer(ap.Addr()); urErr != nil {
-		zap.S().Warnf("Failed to unregister peer '%s': %v", ap.Addr().String(), urErr)
+		d.logger.Warn("Failed to unregister peer", slog.String("peer", ap.Addr().String()), logging.Error(urErr))
 	}
 }
 
@@ -156,7 +160,7 @@ func (d *Distributor) handleMessage(msg peer.ProtoMessage) {
 		d.handleMicroBlockInvMessage(msg.ID, v)
 	case *proto.PBBlockMessage:
 		d.handleProtoBlockMessage(msg.ID, v)
-	case *proto.BlockIdsMessage:
+	case *proto.BlockIDsMessage:
 		d.handleBlockIDsMessage(msg.ID, v.Blocks)
 	}
 }
@@ -164,14 +168,14 @@ func (d *Distributor) handleMessage(msg peer.ProtoMessage) {
 func (d *Distributor) handleScoreMessage(peer peer.Peer, score []byte) {
 	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
 	if err != nil {
-		zap.S().Debugf("[DTR] Failed to parse peer address: %v", err)
+		d.logger.Debug("Failed to parse peer address", logging.Error(err))
 		return
 	}
 	s := big.NewInt(0).SetBytes(score)
-	zap.S().Debugf("[DTR] New score %s recevied from %s", s.String(), ap.Addr().String())
+	d.logger.Debug("New score received", slog.String("score", s.String()), slog.String("peer", ap.Addr().String()))
 	err = d.registry.UpdatePeerScore(ap.Addr(), s)
 	if err != nil {
-		zap.S().Debugf("[DTR] Failed to update score of peer '%s': %v", ap.Addr().String(), err)
+		d.logger.Debug("Failed to update score of peer", slog.String("peer", ap.Addr().String()), logging.Error(err))
 		return
 	}
 }
@@ -179,25 +183,28 @@ func (d *Distributor) handleScoreMessage(peer peer.Peer, score []byte) {
 func (d *Distributor) handleBlockMessage(peer peer.Peer, bm *proto.BlockMessage) {
 	b := &proto.Block{}
 	if err := b.UnmarshalBinary(bm.BlockBytes, d.scheme); err != nil {
-		zap.S().Warnf("Failed to unmarshal block from peer '%s': %v", peer.RemoteAddr().String(), err)
+		d.logger.Warn("Failed to unmarshal block from peer", slog.String("peer", peer.RemoteAddr().String()),
+			logging.Error(err))
 		return
 	}
-	zap.S().Infof("Block '%s' received from peer '%s'", b.BlockID().String(), peer.RemoteAddr().String())
+	d.logger.Info("Block received from peer", slog.String("block", b.BlockID().String()),
+		slog.String("peer", peer.RemoteAddr().String()))
 	if err := d.handleBlock(b, peer.RemoteAddr()); err != nil {
-		zap.S().Warnf("Failed to handle block from peer '%s': %v", peer.RemoteAddr().String(), err)
+		d.logger.Warn("Failed to handle block from peer", slog.String("peer", peer.RemoteAddr().String()), logging.Error(err))
 	}
 }
 
 func (d *Distributor) handleProtoBlockMessage(peer peer.Peer, bm *proto.PBBlockMessage) {
 	b := &proto.Block{}
 	if err := b.UnmarshalFromProtobuf(bm.PBBlockBytes); err != nil {
-		zap.S().Warnf("Failed to unmarshal protobuf block from peer '%s': %v",
-			peer.RemoteAddr().String(), err)
+		d.logger.Warn("Failed to unmarshal protobuf block from peer", slog.String("peer", peer.RemoteAddr().String()),
+			logging.Error(err))
 		return
 	}
-	zap.S().Infof("Block '%s' received from peer '%s'", b.BlockID().String(), peer.RemoteAddr().String())
+	d.logger.Info("Block received from peer", slog.String("block", b.BlockID().String()),
+		slog.String("peer", peer.RemoteAddr().String()))
 	if err := d.handleBlock(b, peer.RemoteAddr()); err != nil {
-		zap.S().Warnf("Failed to handle block from peer '%s': %v", peer.RemoteAddr().String(), err)
+		d.logger.Warn("Failed to handle block from peer", slog.String("peer", peer.RemoteAddr().String()), logging.Error(err))
 	}
 }
 
@@ -209,33 +216,34 @@ func (d *Distributor) handleBlock(block *proto.Block, addr proto.TCPAddr) error 
 	if putErr := d.linkage.PutBlock(block, ap.Addr()); putErr != nil && !errors.Is(putErr, chains.ErrParentNotFound) {
 		return fmt.Errorf("failed to append block: %w", err)
 	}
-	zap.S().Debugf("[DTR] Block '%s' from '%s' was appended", block.BlockID().String(), ap.Addr().String())
+	d.logger.Debug("Block was appended", slog.String("block", block.BlockID().String()),
+		slog.String("peer", ap.Addr().String()))
 	d.blockCh <- loading.BlockPackage{Peer: ap.Addr(), Block: block}
 	return nil
 }
 
 func (d *Distributor) handlePeersMessage(pm *proto.PeersMessage) {
-	zap.S().Debugf("[DTR] Received %d peers", len(pm.Peers))
+	d.logger.Debug("Peers received", slog.Int("count", len(pm.Peers)))
 	addresses := make([]*net.TCPAddr, 0, len(pm.Peers))
 	for _, pi := range pm.Peers {
 		ap, err := netip.ParseAddrPort(pi.String())
 		if err != nil {
-			zap.S().Debugf("[DTR] Failed to parse peer address: %v", err)
+			d.logger.Debug("Failed to parse peer address", logging.Error(err))
 			continue
 		}
 		addresses = append(addresses, net.TCPAddrFromAddrPort(ap))
 	}
 	cnt := d.registry.AppendAddresses(addresses)
 	if cnt > 0 {
-		zap.S().Infof("[DTR] Added %d new peers", cnt)
+		d.logger.Info("New peers added", slog.Int("count", cnt))
 	}
 }
 
 func (d *Distributor) handleGetPeersMessage(peer peer.Peer) {
-	zap.S().Debugf("[DTR] Get peers from %s", peer.RemoteAddr().String())
+	d.logger.Debug("Get peers request received", slog.String("peer", peer.RemoteAddr().String()))
 	friendlyPeers, err := d.registry.FriendlyPeers()
 	if err != nil {
-		zap.S().Warnf("Failed to get peers: %v", err)
+		d.logger.Warn("Failed to get peers", logging.Error(err))
 		return
 	}
 	infos := make([]proto.PeerInfo, 0, len(friendlyPeers))
@@ -255,47 +263,48 @@ func (d *Distributor) handleGetPeersMessage(peer peer.Peer) {
 func (d *Distributor) handleSignaturesMessage(peer peer.Peer, signatures []crypto.Signature) {
 	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
 	if err != nil {
-		zap.S().Warnf("Failed to parse peer address: %v", err)
+		d.logger.Warn("Failed to parse peer address", logging.Error(err))
 		return
 	}
 	ids := make([]proto.BlockID, len(signatures))
 	for i, s := range signatures {
 		ids[i] = proto.NewBlockIDFromSignature(s)
 	}
-	zap.S().Debugf("[DTR] Signatures received from '%s'", ap.Addr().String())
+	d.logger.Debug("Signatures received", slog.String("peer", ap.Addr().String()))
 	d.idsCh <- loading.IDsPackage{Peer: ap.Addr(), IDs: ids}
 }
 
 func (d *Distributor) handleBlockIDsMessage(peer peer.Peer, ids []proto.BlockID) {
 	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
 	if err != nil {
-		zap.S().Warnf("Failed to parse peer address: %v", err)
+		d.logger.Warn("Failed to parse peer address", logging.Error(err))
 		return
 	}
 	if len(ids) == 0 {
-		zap.S().Warnf("Empty IDs list received from '%s'", ap.Addr().String())
+		d.logger.Warn("Empty IDs list received", slog.String("peer", ap.Addr().String()))
 		return
 	}
-	zap.S().Debugf("[DTR] Block IDs [%s..%s] received from %s",
-		ids[0].ShortString(), ids[len(ids)-1].ShortString(), ap.Addr().String())
+	d.logger.Debug("Block IDs received", slog.String("first", ids[0].ShortString()),
+		slog.String("last", ids[len(ids)-1].ShortString()), slog.String("peer", ap.Addr().String()))
 	d.idsCh <- loading.IDsPackage{Peer: ap.Addr(), IDs: ids}
 }
 
 func (d *Distributor) handleMicroBlockInvMessage(peer peer.Peer, msg *proto.MicroBlockInvMessage) {
 	ap, err := netip.ParseAddrPort(peer.RemoteAddr().String())
 	if err != nil {
-		zap.S().Warnf("Failed to parse peer address: %v", err)
+		d.logger.Warn("Failed to parse peer address", logging.Error(err))
 		return
 	}
 	inv := &proto.MicroBlockInv{}
 	if umErr := inv.UnmarshalBinary(msg.Body); umErr != nil {
-		zap.S().Warnf("Failed to unmarshal MicroBlockInv message: %v", umErr)
+		d.logger.Warn("Failed to unmarshal MicroBlockInv message", logging.Error(umErr))
 		return
 	}
 	if putErr := d.linkage.PutMicroBlock(inv, ap.Addr()); putErr != nil {
-		zap.S().Warnf("Failed to append micro-block '%s' received form '%s': %v",
-			inv.TotalBlockID.String(), ap.Addr().String(), putErr)
+		d.logger.Warn("Failed to append micro-block", slog.String("block", inv.TotalBlockID.String()),
+			slog.String("peer", ap.Addr().String()), logging.Error(putErr))
 		return
 	}
-	zap.S().Infof("Micro-block '%s' received from peer '%s'", inv.TotalBlockID.String(), ap.Addr().String())
+	d.logger.Info("Micro-block received from peer", slog.String("block", inv.TotalBlockID.String()),
+		slog.String("peer", ap.Addr().String()))
 }

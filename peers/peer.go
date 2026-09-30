@@ -2,13 +2,13 @@ package peers
 
 import (
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/netip"
 	"time"
 
 	"github.com/wavesplatform/gowaves/pkg/crypto"
-	"go.uber.org/zap"
 
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
 	"github.com/wavesplatform/gowaves/pkg/proto"
@@ -29,6 +29,7 @@ type Peer struct {
 	NextAttempt time.Time      `json:"next_attempt"`
 	Score       *big.Int       `json:"score"`
 	p           peer.Peer
+	logger      *slog.Logger
 }
 
 func (p *Peer) String() string {
@@ -52,9 +53,17 @@ func (p *Peer) TCPAddr() *net.TCPAddr {
 	}
 }
 
+// log returns the peer's logger, or a discarding logger if the peer has no active connection.
+func (p *Peer) log() *slog.Logger {
+	if p.logger == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return p.logger
+}
+
 func (p *Peer) Send(msg proto.Message) {
 	if p.p != nil {
-		zap.S().Debugf("Sending message to %s", p.AddressPort.String())
+		p.log().Debug("Sending message")
 		p.p.SendMessage(msg)
 	}
 }
@@ -66,12 +75,12 @@ func (p *Peer) RequestBlockIDs(ids []proto.BlockID) {
 		for i, id := range ids {
 			sigs[i] = id.Signature()
 		}
-		zap.S().Debugf("[%s] Requesting signatures for signatures range [%s...%s]",
-			p.p.ID().String(), sigs[0].ShortString(), sigs[len(sigs)-1].ShortString())
+		p.log().Debug("Requesting signatures for signatures range",
+			slog.String("first", sigs[0].ShortString()), slog.String("last", sigs[len(sigs)-1].ShortString()))
 		p.p.SendMessage(&proto.GetSignaturesMessage{Signatures: sigs})
 	} else {
-		zap.S().Debugf("[%s] Requesting blocks IDs for IDs range [%s...%s]",
-			p.p.ID().String(), ids[0].ShortString(), ids[len(ids)-1].ShortString())
+		p.log().Debug("Requesting blocks IDs for IDs range",
+			slog.String("first", ids[0].ShortString()), slog.String("last", ids[len(ids)-1].ShortString()))
 		p.p.SendMessage(&proto.GetBlockIDsMessage{Blocks: ids})
 	}
 }

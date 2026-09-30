@@ -3,10 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
-
-	"go.uber.org/zap"
 
 	"github.com/wavesplatform/gowaves/pkg/p2p/incoming"
 	"github.com/wavesplatform/gowaves/pkg/p2p/outgoing"
@@ -28,10 +27,14 @@ type ConnectionManager struct {
 	parent    peer.Parent
 	vp        peers.VersionProvider
 	discarded map[proto.PeerMessageID]bool
+	logger    *slog.Logger
+	nl        *slog.Logger // Network logger.
+	ndl       *slog.Logger // Network data logger.
 }
 
 func NewConnectionManager(
 	scheme byte, name string, nonce uint32, declared proto.TCPAddr, vp peers.VersionProvider, parent peer.Parent,
+	logger, nl, ndl *slog.Logger,
 ) *ConnectionManager {
 	discardedMessages := map[proto.PeerMessageID]bool{
 		proto.ContentIDGetPeers:                  false,
@@ -54,6 +57,7 @@ func NewConnectionManager(
 		proto.ContentIDMicroBlockSnapshot:        true,
 		proto.ContentIDBlockSnapshot:             true,
 		proto.ContentIDMicroBlockSnapshotRequest: true,
+		proto.ContentIDEndorseBlock:              true,
 	}
 	return &ConnectionManager{
 		network:   fmt.Sprintf("%s%c", defaultApplication, scheme),
@@ -63,11 +67,14 @@ func NewConnectionManager(
 		parent:    parent,
 		vp:        vp,
 		discarded: discardedMessages,
+		logger:    logger,
+		nl:        nl,
+		ndl:       ndl,
 	}
 }
 
 func (h *ConnectionManager) Accept(ctx context.Context, conn net.Conn) error {
-	zap.S().Debugf("[CON] New incoming connection from %s", conn.RemoteAddr())
+	h.logger.Debug("New incoming connection", slog.String("remote", conn.RemoteAddr().String()))
 
 	ap, err := netip.ParseAddrPort(conn.RemoteAddr().String())
 	if err != nil {
@@ -88,11 +95,11 @@ func (h *ConnectionManager) Accept(ctx context.Context, conn net.Conn) error {
 		Version:      ver,
 	}
 
-	return incoming.RunIncomingPeer(ctx, params)
+	return incoming.RunIncomingPeer(ctx, params, h.nl, h.ndl)
 }
 
 func (h *ConnectionManager) Connect(ctx context.Context, addr proto.TCPAddr) error {
-	zap.S().Debugf("[CON] New outgoing connection to %s", addr)
+	h.logger.Debug("New outgoing connection", slog.String("address", addr.String()))
 	params := outgoing.EstablishParams{
 		Address:      addr,
 		WavesNetwork: h.network,
@@ -110,7 +117,7 @@ func (h *ConnectionManager) Connect(ctx context.Context, addr proto.TCPAddr) err
 	if err != nil {
 		return err
 	}
-	return outgoing.EstablishConnection(ctx, params, ver)
+	return outgoing.EstablishConnection(ctx, params, ver, h.nl, h.ndl)
 }
 
 func (h *ConnectionManager) skipFunc(header proto.Header) bool {

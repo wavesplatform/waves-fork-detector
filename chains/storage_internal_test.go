@@ -13,7 +13,7 @@ import (
 
 func TestDoubleInitialization(t *testing.T) {
 	st, _ := createTestStorage(t)
-	genesis := settings.TestNetSettings.Genesis
+	genesis := settings.MustTestNetSettings().Genesis
 	err := st.initialize(genesis)
 	require.NoError(t, err)
 	bl, err := st.block(genesis.BlockID())
@@ -367,7 +367,7 @@ func BenchmarkLCAOnTwo1MBlockForks(b *testing.B) {
 func createTestStorage(t testing.TB) (*storage, proto.BlockID) {
 	st, err := newStorage(t.TempDir(), proto.TestNetScheme)
 	require.NoError(t, err)
-	genesis := settings.TestNetSettings.Genesis
+	genesis := settings.MustTestNetSettings().Genesis
 	err = st.initialize(genesis)
 	require.NoError(t, err)
 	return st, genesis.BlockID()
