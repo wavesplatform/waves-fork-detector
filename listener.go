@@ -19,7 +19,6 @@ type Listener struct {
 	declared proto.TCPAddr
 
 	cm *ConnectionManager
-	nl net.Listener
 
 	logger *slog.Logger
 }
@@ -53,10 +52,6 @@ func (l *Listener) Run(ctx context.Context) {
 }
 
 func (l *Listener) Shutdown() {
-	if err := l.nl.Close(); err != nil {
-		l.logger.Error("Failed to close listener", slog.String("bind", l.bind.String()), logging.Error(err))
-		return
-	}
 	if err := l.wait(); err != nil {
 		l.logger.Warn("Failed to shutdown Listener", logging.Error(err))
 	}
@@ -70,15 +65,21 @@ func (l *Listener) run() error {
 	if err != nil {
 		return err
 	}
-	l.nl = nl
+	defer func() { _ = nl.Close() }()
+	// Unblock Accept when the shared context is canceled.
+	stop := context.AfterFunc(l.ctx, func() { _ = nl.Close() })
+	defer stop()
 
 	for {
 		select {
 		case <-l.ctx.Done():
 			return nil
 		default:
-			conn, acErr := l.nl.Accept()
+			conn, acErr := nl.Accept()
 			if acErr != nil {
+				if l.ctx.Err() != nil {
+					return nil
+				}
 				l.logger.Error("Failed to accept connection", logging.Error(acErr))
 				continue
 			}

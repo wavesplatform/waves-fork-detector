@@ -11,6 +11,7 @@ import (
 
 	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/alexeykiselev/waves-fork-detector/api"
 	"github.com/alexeykiselev/waves-fork-detector/chains"
@@ -55,6 +56,7 @@ func run() error {
 
 	ctx, done := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer done()
+	g, ctx := errgroup.WithContext(ctx)
 
 	slog.Info("Waves Fork Detector", slog.String("version", version.ForkDetectorVersion()))
 	p.log()
@@ -85,6 +87,12 @@ func run() error {
 		return fmt.Errorf("failed to create API server: %w", err)
 	}
 	a.Run(ctx)
+	g.Go(func() error {
+		if apiErr := a.Wait(); apiErr != nil {
+			return fmt.Errorf("API server failed: %w", apiErr)
+		}
+		return nil
+	})
 
 	parent := peer.NewParent(true)
 	nl := buildLogger(h, netNamespace, p.logNetwork)
@@ -106,7 +114,7 @@ func run() error {
 	loader.Run(ctx)
 
 	<-ctx.Done()
-	slog.Info("User termination in progress...")
+	slog.Info("Termination in progress...")
 
 	a.Shutdown()
 	listener.Shutdown()
@@ -116,7 +124,7 @@ func run() error {
 
 	slog.Info("Terminated")
 
-	return nil
+	return g.Wait()
 }
 
 func initializePeers(reg *peers.Registry, seeds []*net.TCPAddr, logger *slog.Logger) {

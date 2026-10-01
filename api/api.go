@@ -101,6 +101,11 @@ func (a *API) Run(ctx context.Context) {
 	g.Go(a.runServer)
 }
 
+// Wait waits for the API server started by Run to stop and returns its error.
+func (a *API) Wait() error {
+	return a.wait()
+}
+
 func (a *API) Shutdown() {
 	if err := a.srv.Shutdown(a.ctx); err != nil && !errors.Is(err, context.Canceled) {
 		a.logger.Error("Failed to shutdown API", logging.Error(err))

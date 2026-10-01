@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,6 +19,50 @@ import (
 
 	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
+
+func TestAPIBindFailureTerminatesProcess(t *testing.T) {
+	var cfg net.ListenConfig
+	occupied, err := cfg.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, occupied.Close()) })
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name     string
+		bind     string
+		declared string
+	}{
+		{name: "no peer listener", bind: "127.0.0.1:0"},
+		{name: "starting peer listener", bind: "127.0.0.1:0", declared: "127.0.0.1:6868"},
+		{name: "failed peer listener", bind: occupied.Addr().String(), declared: "127.0.0.1:6868"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, executable, "-test.run=^TestAPIProcessHelper$", "--",
+				"-db", t.TempDir(), "-api", occupied.Addr().String(),
+				"-net", tc.bind, "-declared-address", tc.declared)
+			cmd.Env = append(os.Environ(), "FORK_DETECTOR_API_PROCESS_TEST=1")
+			output, runErr := cmd.CombinedOutput()
+			require.NoError(t, ctx.Err(), "process did not terminate: %s", output)
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, runErr, &exitErr, "%s", output)
+			require.Equal(t, 1, exitErr.ExitCode(), "%s", output)
+			require.Contains(t, string(output), "API server failed")
+			require.Contains(t, string(output), "Terminated")
+		})
+	}
+}
+
+func TestAPIProcessHelper(_ *testing.T) {
+	if os.Getenv("FORK_DETECTOR_API_PROCESS_TEST") != "1" {
+		return
+	}
+	// Isolate application flags and os.Exit in the child process.
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	os.Args = append(os.Args[:1], os.Args[3:]...)
+	os.Exit(realMain())
+}
 
 func TestInitializePeersPreservesExpiredSeeds(t *testing.T) {
 	path := t.TempDir()
