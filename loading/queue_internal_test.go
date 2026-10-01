@@ -105,13 +105,11 @@ func createNthBlock(t testing.TB, prev proto.BlockID, n int) *proto.Block {
 	const tsStep uint64 = 10000
 	id := testID(t, fmt.Sprintf("BLOCK%d", n))
 	return &proto.Block{
-		BlockHeader: proto.BlockHeader{
-			Version:            proto.ProtobufBlockVersion,
-			Timestamp:          tsStep * uint64(n),
-			Parent:             prev,
-			NxtConsensus:       proto.NxtConsensus{BaseTarget: 12345},
-			GeneratorPublicKey: crypto.PublicKey{},
-			ID:                 id,
-		},
+		Version:            proto.ProtobufBlockVersion,
+		Timestamp:          tsStep * uint64(n),
+		Parent:             prev,
+		BaseTarget:         12345,
+		GeneratorPublicKey: crypto.PublicKey{},
+		ID:                 id,
 	}
 }
