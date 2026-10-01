@@ -9,7 +9,7 @@ require (
 	github.com/rhansen/go-kairos v0.0.0-20230622235007-87f08a46d19b
 	github.com/stretchr/testify v1.12.1
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
-	github.com/wavesplatform/gowaves v0.10.7-0.20260928125727-165e7a361c94
+	github.com/wavesplatform/gowaves v0.10.7-0.20261001122251-fc8acb090fce
 	golang.org/x/sync v0.23.0
 )
 

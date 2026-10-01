@@ -96,8 +96,8 @@ github.com/umbracle/fastrlp v0.1.0 h1:V0W3f6ZKWqbu1KggdhnRWOi+t7+PfL3VyAffJqayI5
 github.com/umbracle/fastrlp v0.1.0/go.mod h1:5RHgqiFjd4vLJESMWagP/E7su+5Gzk0iqqmrotR8WdA=
 github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
 github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
-github.com/wavesplatform/gowaves v0.10.7-0.20260928125727-165e7a361c94 h1:uzipYCPzDBTUGsBIAdrDwoiU5DD9kwEeJq+8C1/33so=
-github.com/wavesplatform/gowaves v0.10.7-0.20260928125727-165e7a361c94/go.mod h1:4ZcXbwHwzmz9ya7+Or6KQ6S+b8l4GEqC8ZAET5P9KrE=
+github.com/wavesplatform/gowaves v0.10.7-0.20261001122251-fc8acb090fce h1:JHBGxTn0Y9WgBMq4wq9RgSkmwXk29DmeVIX7WZxRjH8=
+github.com/wavesplatform/gowaves v0.10.7-0.20261001122251-fc8acb090fce/go.mod h1:4ZcXbwHwzmz9ya7+Or6KQ6S+b8l4GEqC8ZAET5P9KrE=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 go.uber.org/atomic v1.12.0 h1:BvcXdFKuviU4fTL/f+SxdQ5qJX/Jix8pAkgdUcb3XOE=
