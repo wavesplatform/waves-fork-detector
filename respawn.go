@@ -16,7 +16,10 @@ import (
 	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
 
-const respawnInterval = 10 * time.Second
+const (
+	respawnInterval = 10 * time.Second
+	pruneInterval   = 1 * time.Hour
+)
 
 type Respawn struct {
 	ctx   context.Context
@@ -54,10 +57,14 @@ func (r *Respawn) Shutdown() {
 }
 
 func (r *Respawn) handleEvents() error {
+	pruneTicker := time.NewTicker(pruneInterval)
+	defer pruneTicker.Stop()
 	for {
 		select {
 		case <-r.ctx.Done():
 			return nil
+		case <-pruneTicker.C:
+			r.pruneStalePeers()
 		case <-r.timer.C:
 			addresses, err := r.reg.TakeAvailableAddresses()
 			if len(addresses) > 0 {
@@ -73,6 +80,17 @@ func (r *Respawn) handleEvents() error {
 			r.establishConnections(addresses)
 			r.timer.Reset(respawnInterval)
 		}
+	}
+}
+
+func (r *Respawn) pruneStalePeers() {
+	n, err := r.reg.PruneStalePeers()
+	if err != nil {
+		r.logger.Warn("Failed to prune stale peers", logging.Error(err))
+		return
+	}
+	if n > 0 {
+		r.logger.Info("Stale peers removed", slog.Int("count", n))
 	}
 }
 

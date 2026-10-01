@@ -20,6 +20,10 @@ import (
 
 const (
 	delay = 10 * time.Minute
+	// activeWindow is the period during which a peer is considered active after it was last seen.
+	activeWindow = 96 * time.Hour
+	// staleAge is the period after which a peer that was not seen is removed from the storage.
+	staleAge = 30 * 24 * time.Hour
 )
 
 type Registry struct {
@@ -31,6 +35,7 @@ type Registry struct {
 	mu          sync.Mutex
 	connections map[netip.Addr]peer.Peer
 	pending     map[netip.Addr]struct{}
+	seeds       map[netip.Addr]struct{}
 
 	logger *slog.Logger
 }
@@ -56,6 +61,7 @@ func NewRegistry(
 		storage:     s,
 		connections: make(map[netip.Addr]peer.Peer),
 		pending:     make(map[netip.Addr]struct{}),
+		seeds:       make(map[netip.Addr]struct{}),
 		logger:      logger,
 	}, nil
 }
@@ -86,15 +92,17 @@ func (r *Registry) RegisterPeer(addr netip.Addr, np peer.Peer, handshake proto.H
 			_ = np.Close()
 			return fmt.Errorf("failed to register peer: %w", err)
 		}
-		if p.State == PeerHostile {
-			_ = np.Close()
-			return fmt.Errorf("peer '%s' already registered as hostile", addr.String())
-		}
-		p = Peer{}
+		p = Peer{AddressPort: netip.AddrPortFrom(addr, 0)}
+	}
+	if p.State == PeerHostile {
+		_ = np.Close()
+		return fmt.Errorf("peer '%s' already registered as hostile", addr.String())
 	}
 
+	now := time.Now().Round(time.Second)
 	if np.Handshake().Version.CmpMinor(p.Version) >= 2 {
 		p.State = PeerHostile
+		p.LastSeen = now
 		p.Version = np.Handshake().Version
 		p.Name = fmt.Sprintf("%s(%s)", np.Handshake().NodeName, np.Handshake().AppName)
 		_ = np.Close()
@@ -102,6 +110,7 @@ func (r *Registry) RegisterPeer(addr netip.Addr, np peer.Peer, handshake proto.H
 	}
 	if np.Handshake().AppName[len(np.Handshake().AppName)-1] != r.scheme {
 		p.State = PeerHostile
+		p.LastSeen = now
 		p.Version = np.Handshake().Version
 		p.Name = fmt.Sprintf("%s(%s)", np.Handshake().NodeName, np.Handshake().AppName)
 		_ = np.Close()
@@ -117,7 +126,8 @@ func (r *Registry) RegisterPeer(addr netip.Addr, np peer.Peer, handshake proto.H
 	p.Name = handshake.NodeName
 	p.Version = handshake.Version
 	p.State = PeerConnected
-	p.NextAttempt = time.Now().Round(time.Second)
+	p.NextAttempt = now
+	p.LastSeen = now
 	p.p = np
 
 	r.connections[addr] = np
@@ -134,6 +144,7 @@ func (r *Registry) UpdatePeerScore(addr netip.Addr, score *big.Int) error {
 		return fmt.Errorf("failed to update peer score: %w", err)
 	}
 	p.Score = score
+	p.LastSeen = time.Now().Round(time.Second)
 	return r.storage.putPeer(p)
 }
 
@@ -175,7 +186,11 @@ func (r *Registry) UnregisterPeer(addr netip.Addr) error {
 	}
 
 	delete(r.pending, addr)
-	delete(r.connections, addr)
+	if _, ok := r.connections[addr]; ok {
+		// The peer was alive until this moment.
+		p.LastSeen = time.Now().Round(time.Second)
+		delete(r.connections, addr)
+	}
 
 	p.NextAttempt = time.Now().Add(delay).Round(time.Second)
 	p.p = nil
@@ -203,6 +218,7 @@ func (r *Registry) MarkAsHostile(addr net.Addr) error {
 
 	p.AddressPort = netip.AddrPortFrom(a, 0)
 	p.State = PeerHostile
+	p.LastSeen = time.Now().Round(time.Second)
 	return r.storage.putPeer(p)
 }
 
@@ -230,6 +246,16 @@ func (r *Registry) Connections() ([]Peer, error) {
 // AppendAddresses adds new addresses to the storage filtering out already known addresses.
 // Function returns the number of newly added addresses.
 func (r *Registry) AppendAddresses(addresses []*net.TCPAddr) int {
+	return r.appendAddresses(addresses, false)
+}
+
+// AppendSeedAddresses adds configured seeds and exempts them from stale-peer pruning for this run.
+// Existing peer state and retry times are preserved. It returns the number of newly added addresses.
+func (r *Registry) AppendSeedAddresses(addresses []*net.TCPAddr) int {
+	return r.appendAddresses(addresses, true)
+}
+
+func (r *Registry) appendAddresses(addresses []*net.TCPAddr, seeds bool) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -252,6 +278,9 @@ func (r *Registry) AppendAddresses(addresses []*net.TCPAddr) int {
 			r.logger.Debug("Skipping self address", slog.String("address", ap.String()))
 			continue
 		}
+		if seeds {
+			r.seeds[ap.Addr()] = struct{}{}
+		}
 		yes, err := r.storage.hasPeer(ap.Addr())
 		if err != nil {
 			r.logger.Debug("Failed to append addresses", logging.Error(err))
@@ -261,6 +290,7 @@ func (r *Registry) AppendAddresses(addresses []*net.TCPAddr) int {
 			p := Peer{
 				AddressPort: ap,
 				State:       PeerUnknown,
+				LastSeen:    time.Now().Round(time.Second),
 			}
 			if putErr := r.storage.putPeer(p); putErr != nil {
 				r.logger.Warn("Failed to append addresses", logging.Error(putErr))
@@ -307,6 +337,75 @@ func (r *Registry) FriendlyPeers() ([]Peer, error) {
 	}
 	sort.Sort(ByName(friends))
 	return friends, nil
+}
+
+// ActivePeers returns the peers suitable for advertising to other nodes: successfully connected at least once,
+// with known listening port, and either connected right now or seen during the active window.
+func (r *Registry) ActivePeers() ([]Peer, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	peers, err := r.storage.peers()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active peers: %w", err)
+	}
+	threshold := time.Now().Add(-activeWindow)
+	active := make([]Peer, 0)
+	for _, p := range peers {
+		if p.State != PeerConnected || p.AddressPort.Port() == 0 {
+			continue
+		}
+		if _, ok := r.connections[p.AddressPort.Addr()]; ok || p.LastSeen.After(threshold) {
+			active = append(active, p)
+		}
+	}
+	return active, nil
+}
+
+// PruneStalePeers removes the peers that were not seen longer than the stale age.
+// Configured seeds are retained regardless of age.
+// Peers without the last seen time (stored by previous versions) get the current time to start counting from.
+// Function returns the number of removed peers.
+func (r *Registry) PruneStalePeers() (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	peers, err := r.storage.peers()
+	if err != nil {
+		return 0, fmt.Errorf("failed to prune stale peers: %w", err)
+	}
+	now := time.Now().Round(time.Second)
+	threshold := now.Add(-staleAge)
+	stale := make([]netip.Addr, 0)
+	for _, p := range peers {
+		addr := p.AddressPort.Addr()
+		if _, ok := r.seeds[addr]; ok {
+			continue
+		}
+		if _, ok := r.connections[addr]; ok {
+			continue
+		}
+		if _, ok := r.pending[addr]; ok {
+			continue
+		}
+		if p.LastSeen.IsZero() {
+			p.LastSeen = now
+			if putErr := r.storage.putPeer(p); putErr != nil {
+				return 0, fmt.Errorf("failed to prune stale peers: %w", putErr)
+			}
+			continue
+		}
+		if p.LastSeen.Before(threshold) {
+			stale = append(stale, addr)
+		}
+	}
+	if len(stale) == 0 {
+		return 0, nil
+	}
+	if dErr := r.storage.deletePeers(stale); dErr != nil {
+		return 0, fmt.Errorf("failed to prune stale peers: %w", dErr)
+	}
+	return len(stale), nil
 }
 
 func (r *Registry) Addresses() ([]net.Addr, error) {

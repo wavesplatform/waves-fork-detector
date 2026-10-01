@@ -28,6 +28,7 @@ type Peer struct {
 	State       State          `json:"state"`
 	NextAttempt time.Time      `json:"next_attempt"`
 	Score       *big.Int       `json:"score"`
+	LastSeen    time.Time      `json:"last_seen"`
 	p           peer.Peer
 	logger      *slog.Logger
 }

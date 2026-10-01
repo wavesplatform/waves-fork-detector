@@ -47,6 +47,7 @@ type value struct {
 	State       State     `cbor:"4,keyasint"`
 	NextAttempt time.Time `cbor:"5,keyasint"`
 	Score       *big.Int  `cbor:"6,keyasint"`
+	LastSeen    time.Time `cbor:"7,keyasint"`
 }
 
 type storage struct {
@@ -78,7 +79,7 @@ func (s *storage) peer(addr netip.Addr) (Peer, error) {
 	}
 	val := new(value)
 	if umErr := cbor.Unmarshal(v, val); umErr != nil {
-		return Peer{}, err
+		return Peer{}, umErr
 	}
 	ver, err := proto.NewVersionFromString(val.Version)
 	if err != nil {
@@ -92,6 +93,7 @@ func (s *storage) peer(addr netip.Addr) (Peer, error) {
 		State:       val.State,
 		NextAttempt: val.NextAttempt,
 		Score:       val.Score,
+		LastSeen:    val.LastSeen,
 	}, nil
 }
 
@@ -112,6 +114,7 @@ func (s *storage) putPeer(peer Peer) error {
 		State:       peer.State,
 		NextAttempt: peer.NextAttempt,
 		Score:       peer.Score,
+		LastSeen:    peer.LastSeen,
 	}
 	b, err := cbor.Marshal(v)
 	if err != nil {
@@ -149,10 +152,20 @@ func (s *storage) peers() ([]Peer, error) {
 			NextAttempt: v.NextAttempt,
 			State:       v.State,
 			Score:       v.Score,
+			LastSeen:    v.LastSeen,
 		}
 		r = append(r, p)
 	}
 	return r, nil
+}
+
+func (s *storage) deletePeers(addrs []netip.Addr) error {
+	batch := new(leveldb.Batch)
+	for _, a := range addrs {
+		k := key{addr: a}
+		batch.Delete(k.bytes())
+	}
+	return s.db.Write(batch, nil)
 }
 
 func (s *storage) hasPeer(addr netip.Addr) (bool, error) {

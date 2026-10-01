@@ -31,6 +31,7 @@ func (r *Registry) SuggestVersion(addr netip.Addr) (proto.Version, error) {
 			Version:     ver,
 			NextAttempt: time.Now().Add(delay).Round(time.Second),
 			State:       PeerUnknown,
+			LastSeen:    time.Now().Round(time.Second),
 		}
 		if putErr := r.storage.putPeer(np); putErr != nil {
 			return proto.Version{}, fmt.Errorf("failed to save peer: %w", putErr)

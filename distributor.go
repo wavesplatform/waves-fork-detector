@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"time"
@@ -23,7 +24,11 @@ import (
 	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
 
-const pingInterval = 1 * time.Minute
+const (
+	pingInterval = 1 * time.Minute
+	// maxPeersInMessage is the limit of addresses in Peers message, exceeding it gets the sender blacklisted.
+	maxPeersInMessage = 1000
+)
 
 type Distributor struct {
 	ctx  context.Context
@@ -241,18 +246,23 @@ func (d *Distributor) handlePeersMessage(pm *proto.PeersMessage) {
 
 func (d *Distributor) handleGetPeersMessage(peer peer.Peer) {
 	d.logger.Debug("Get peers request received", slog.String("peer", peer.RemoteAddr().String()))
-	friendlyPeers, err := d.registry.FriendlyPeers()
+	activePeers, err := d.registry.ActivePeers()
 	if err != nil {
 		d.logger.Warn("Failed to get peers", logging.Error(err))
 		return
 	}
-	infos := make([]proto.PeerInfo, 0, len(friendlyPeers))
-	for _, p := range friendlyPeers {
+	infos := make([]proto.PeerInfo, 0, len(activePeers))
+	for _, p := range activePeers {
 		pi := proto.PeerInfo{
 			Addr: p.TCPAddr().IP,
 			Port: p.AddressPort.Port(),
 		}
 		infos = append(infos, pi)
+	}
+	if len(infos) > maxPeersInMessage {
+		swap := func(i, j int) { infos[i], infos[j] = infos[j], infos[i] }
+		rand.Shuffle(len(infos), swap) //nolint:gosec // No need for crypto random here.
+		infos = infos[:maxPeersInMessage]
 	}
 	peersMessage := &proto.PeersMessage{
 		Peers: infos,

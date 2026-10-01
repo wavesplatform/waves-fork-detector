@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -69,10 +70,7 @@ func run() error {
 		}
 	}(reg)
 
-	n := reg.AppendAddresses(p.seedPeers)
-	if n > 0 {
-		slog.Info("Seed peers added to storage", slog.Int("count", n))
-	}
+	initializePeers(reg, p.seedPeers, newLogger(h, registryNamespace))
 
 	linkage, err := chains.NewLinkage(p.dbPath, p.scheme, p.genesis, newLogger(h, linkageNamespace))
 	if err != nil {
@@ -119,6 +117,19 @@ func run() error {
 	slog.Info("Terminated")
 
 	return nil
+}
+
+func initializePeers(reg *peers.Registry, seeds []*net.TCPAddr, logger *slog.Logger) {
+	// Protect configured seeds before pruning existing records.
+	if added := reg.AppendSeedAddresses(seeds); added > 0 {
+		logger.Info("Seed peers added to storage", slog.Int("count", added))
+	}
+	n, err := reg.PruneStalePeers()
+	if err != nil {
+		logger.Warn("Failed to prune stale peers", logging.Error(err))
+	} else if n > 0 {
+		logger.Info("Stale peers removed", slog.Int("count", n))
+	}
 }
 
 func buildLogger(h slog.Handler, namespace string, enabled bool) *slog.Logger {
