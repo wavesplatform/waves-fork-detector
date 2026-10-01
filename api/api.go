@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"os"
 	"runtime"
 	"sort"
 	"strconv"
@@ -116,7 +115,7 @@ func (a *API) runServer() error {
 	err := a.srv.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		a.logger.Error("Failed to start API", logging.Error(err))
-		os.Exit(1)
+		return err
 	}
 	return nil
 }
