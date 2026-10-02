@@ -20,7 +20,7 @@ import (
 	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
 
-func TestAPIBindFailureTerminatesProcess(t *testing.T) {
+func TestBindFailureTerminatesProcess(t *testing.T) {
 	var cfg net.ListenConfig
 	occupied, err := cfg.Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -29,18 +29,23 @@ func TestAPIBindFailureTerminatesProcess(t *testing.T) {
 	require.NoError(t, err)
 	for _, tc := range []struct {
 		name     string
+		api      string
 		bind     string
 		declared string
+		expected string
 	}{
-		{name: "no peer listener", bind: "127.0.0.1:0"},
-		{name: "starting peer listener", bind: "127.0.0.1:0", declared: "127.0.0.1:6868"},
-		{name: "failed peer listener", bind: occupied.Addr().String(), declared: "127.0.0.1:6868"},
+		{name: "failed API without peer listener", api: occupied.Addr().String(), bind: "127.0.0.1:0",
+			expected: "API server failed"},
+		{name: "failed API with starting peer listener", api: occupied.Addr().String(), bind: "127.0.0.1:0",
+			declared: "127.0.0.1:6868", expected: "API server failed"},
+		{name: "failed peer listener", api: "127.0.0.1:0", bind: occupied.Addr().String(),
+			declared: "127.0.0.1:6868", expected: "network server failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, executable, "-test.run=^TestAPIProcessHelper$", "--",
-				"-db", t.TempDir(), "-api", occupied.Addr().String(),
+				"-db", t.TempDir(), "-api", tc.api,
 				"-net", tc.bind, "-declared-address", tc.declared)
 			cmd.Env = append(os.Environ(), "FORK_DETECTOR_API_PROCESS_TEST=1")
 			output, runErr := cmd.CombinedOutput()
@@ -48,7 +53,7 @@ func TestAPIBindFailureTerminatesProcess(t *testing.T) {
 			var exitErr *exec.ExitError
 			require.ErrorAs(t, runErr, &exitErr, "%s", output)
 			require.Equal(t, 1, exitErr.ExitCode(), "%s", output)
-			require.Contains(t, string(output), "API server failed")
+			require.Contains(t, string(output), tc.expected)
 			require.Contains(t, string(output), "Terminated")
 		})
 	}

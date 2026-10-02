@@ -252,6 +252,15 @@ components:
           nullable: true
           example: null
           description: Last known Score value; `null` if there was no connection.
+        last_seen:
+          type: string
+          format: date-time
+          example: "2024-11-06T12:26:11Z"
+          description: |-
+            Time of the last activity of the node: the last successful handshake, Score update or disconnection.
+            For a node that was never connected, it is the time when its address was discovered.
+            Only nodes connected at the moment or seen within the last 96 hours are advertised to other nodes.
+            Nodes not seen for 30 days are removed from storage, except the configured seed peers.
 
     Head:
       type: object

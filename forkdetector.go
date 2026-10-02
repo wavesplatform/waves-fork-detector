@@ -102,6 +102,12 @@ func run() error {
 
 	listener := NewListener(p.netBind, p.declaredAddress, connManger, newLogger(h, listenerNamespace))
 	listener.Run(ctx)
+	g.Go(func() error {
+		if lErr := listener.Wait(); lErr != nil {
+			return fmt.Errorf("network server failed: %w", lErr)
+		}
+		return nil
+	})
 
 	respawn := NewRespawn(reg, connManger, newLogger(h, respawnNamespace))
 	respawn.Run(ctx)

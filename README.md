@@ -56,7 +56,8 @@ Reply example:
     "version": "0.0.0",
     "state": 0,
     "next_attempt": "0001-01-01T00:00:00Z",
-    "score": null
+    "score": null,
+    "last_seen": "2024-11-06T12:26:11Z"
   }
 ]
 ```
@@ -72,6 +73,9 @@ Reply fields:
     * `2` `Hostile` - successful connection was established, but the network byte or version is not acceptable.
 * `next_attempt` - time when the next attempt to connect to the node is planned. This field is used during version selection (see the section [Version Selection](#version-selection)).
 * `score` - last known value of the Score; `null` value if there was no connection.
+* `last_seen` - time of the last activity of the node: the last successful handshake, Score update or disconnection. For a node that was never connected, it is the time when its address was discovered.
+
+Nodes that were not seen for 30 days are removed from storage, except the configured seed peers. When other nodes request known peers, Fork Detector replies only with nodes connected at the moment or seen within the last 96 hours (at most 1000 addresses).
 
 ### `GET` `/api/peers/friendly`
 
@@ -87,7 +91,8 @@ Reply example:
     "version": "1.5.8",
     "state": 1,
     "next_attempt": "2024-11-06T12:36:11Z",
-    "score": 967128354984173501468049
+    "score": 967128354984173501468049,
+    "last_seen": "2024-11-06T12:26:11Z"
   }
 ]
 ```
@@ -108,7 +113,8 @@ Reply example:
     "version": "1.5.8",
     "state": 1,
     "next_attempt": "2024-11-06T12:36:11Z",
-    "score": 967129143986158086525130
+    "score": 967129143986158086525130,
+    "last_seen": "2024-11-06T12:26:11Z"
   }
 ]
 ```

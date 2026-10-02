@@ -51,6 +51,11 @@ func (l *Listener) Run(ctx context.Context) {
 	g.Go(l.run)
 }
 
+// Wait waits for the listener started by Run to stop and returns its error.
+func (l *Listener) Wait() error {
+	return l.wait()
+}
+
 func (l *Listener) Shutdown() {
 	if err := l.wait(); err != nil {
 		l.logger.Warn("Failed to shutdown Listener", logging.Error(err))
@@ -63,6 +68,7 @@ func (l *Listener) run() error {
 	var cfg net.ListenConfig
 	nl, err := cfg.Listen(l.ctx, "tcp", l.bind.String())
 	if err != nil {
+		l.logger.Error("Failed to start listening", logging.Error(err))
 		return err
 	}
 	defer func() { _ = nl.Close() }()
