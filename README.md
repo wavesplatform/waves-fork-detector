@@ -75,7 +75,9 @@ Reply fields:
 * `score` - last known value of the Score; `null` value if there was no connection.
 * `last_seen` - time of the last activity of the node: the last successful handshake, Score update or disconnection. For a node that was never connected, it is the time when its address was discovered.
 
-Nodes that were not seen for 30 days are removed from storage, except the configured seed peers. When other nodes request known peers, Fork Detector replies only with nodes connected at the moment or seen within the last 96 hours (at most 1000 addresses).
+Legacy records without `last_seen`, including configured seeds, receive the current time during pruning after an upgrade.
+
+Pruning runs at startup and every hour. Nodes that were not seen for 30 days are removed from storage, except configured seed peers and peers with active or pending connections. When other nodes request known peers, Fork Detector replies only with nodes that have connected successfully at least once, have a known listening port, and are connected at the moment or were seen within the last 96 hours (at most 1000 addresses).
 
 ### `GET` `/api/peers/friendly`
 

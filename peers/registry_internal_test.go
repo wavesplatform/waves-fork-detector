@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wavesplatform/gowaves/pkg/proto"
@@ -170,4 +171,54 @@ func TestPruneStalePeersRetainsSeeds(t *testing.T) {
 	available, err := r.TakeAvailableAddresses()
 	require.NoError(t, err)
 	require.Equal(t, []netip.AddrPort{seed}, available)
+}
+
+func TestPruneStalePeersBackfillsLegacyRecords(t *testing.T) {
+	for _, kind := range []string{"ordinary", "seed", "connected", "pending"} {
+		t.Run(kind, func(t *testing.T) {
+			r := newTestRegistry(t)
+			ap := netip.MustParseAddrPort("1.1.1.1:6868")
+			nextAttempt := time.Now().Add(time.Hour).Round(time.Second)
+			// Previous versions persisted no LastSeen field (CBOR key 7).
+			data, err := cbor.Marshal(map[uint64]any{
+				0: ap.Port(), 3: "1.5.0", 4: PeerConnected, 5: nextAttempt,
+			})
+			require.NoError(t, err)
+			k := key{addr: ap.Addr()}
+			require.NoError(t, r.storage.db.Put(k.bytes(), data, nil))
+			switch kind {
+			case "seed":
+				require.Zero(t, r.AppendSeedAddresses([]*net.TCPAddr{net.TCPAddrFromAddrPort(ap)}))
+			case "connected":
+				r.connections[ap.Addr()] = nil
+			case "pending":
+				r.pending[ap.Addr()] = struct{}{}
+			}
+
+			before := time.Now().Round(time.Second)
+			removed, err := r.PruneStalePeers()
+			require.NoError(t, err)
+			require.Zero(t, removed)
+			p, err := r.Peer(ap.Addr())
+			require.NoError(t, err)
+			require.False(t, p.LastSeen.Before(before))
+			require.False(t, p.LastSeen.After(time.Now().Round(time.Second)))
+			require.Equal(t, PeerConnected, p.State)
+			require.Equal(t, nextAttempt, p.NextAttempt)
+
+			active, err := r.ActivePeers()
+			require.NoError(t, err)
+			require.Equal(t, []string{ap.String()}, addresses(active))
+
+			// Subsequent pruning must preserve an existing timestamp.
+			p.LastSeen = before.Add(-time.Hour)
+			require.NoError(t, r.storage.putPeer(p))
+			removed, err = r.PruneStalePeers()
+			require.NoError(t, err)
+			require.Zero(t, removed)
+			retained, err := r.Peer(ap.Addr())
+			require.NoError(t, err)
+			require.Equal(t, p.LastSeen, retained.LastSeen)
+		})
+	}
 }

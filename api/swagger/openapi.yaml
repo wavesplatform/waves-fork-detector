@@ -259,6 +259,7 @@ components:
           description: |-
             Time of the last activity of the node: the last successful handshake, Score update or disconnection.
             For a node that was never connected, it is the time when its address was discovered.
+            Legacy records without this field, including configured seeds, receive the current time during pruning after an upgrade.
             Only nodes connected at the moment or seen within the last 96 hours are advertised to other nodes.
             Nodes not seen for 30 days are removed from storage, except the configured seed peers.
 

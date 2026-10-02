@@ -378,6 +378,14 @@ func (r *Registry) PruneStalePeers() (int, error) {
 	threshold := now.Add(-staleAge)
 	stale := make([]netip.Addr, 0)
 	for _, p := range peers {
+		// Migrate legacy records even when they are exempt from pruning.
+		if p.LastSeen.IsZero() {
+			p.LastSeen = now
+			if putErr := r.storage.putPeer(p); putErr != nil {
+				return 0, fmt.Errorf("failed to prune stale peers: %w", putErr)
+			}
+			continue
+		}
 		addr := p.AddressPort.Addr()
 		if _, ok := r.seeds[addr]; ok {
 			continue
@@ -386,13 +394,6 @@ func (r *Registry) PruneStalePeers() (int, error) {
 			continue
 		}
 		if _, ok := r.pending[addr]; ok {
-			continue
-		}
-		if p.LastSeen.IsZero() {
-			p.LastSeen = now
-			if putErr := r.storage.putPeer(p); putErr != nil {
-				return 0, fmt.Errorf("failed to prune stale peers: %w", putErr)
-			}
 			continue
 		}
 		if p.LastSeen.Before(threshold) {
