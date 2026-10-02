@@ -3,6 +3,7 @@ package chains
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"math/big"
 	"net/netip"
@@ -12,8 +13,8 @@ import (
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/proto"
-	"go.uber.org/zap"
 )
 
 const (
@@ -44,9 +45,11 @@ type Linkage struct {
 
 	mu *sync.RWMutex
 	st *storage
+
+	logger *slog.Logger
 }
 
-func NewLinkage(path string, scheme proto.Scheme, genesis proto.Block) (*Linkage, error) {
+func NewLinkage(path string, scheme proto.Scheme, genesis proto.Block, logger *slog.Logger) (*Linkage, error) {
 	st, err := newStorage(path, scheme)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize Linkage: %w", err)
@@ -59,13 +62,14 @@ func NewLinkage(path string, scheme proto.Scheme, genesis proto.Block) (*Linkage
 		genesis: genesis.BlockID(),
 		mu:      &sync.RWMutex{},
 		st:      st,
+		logger:  logger,
 	}, nil
 }
 
 func (l *Linkage) Close() {
 	err := l.st.close()
 	if err != nil {
-		zap.S().Errorf("Failed to close Linkage: %v", err)
+		l.logger.Error("Failed to close Linkage", logging.Error(err))
 	}
 }
 
@@ -234,26 +238,26 @@ func (l *Linkage) LogInitialStats() {
 
 	heads, err := l.activeHeads()
 	if err != nil {
-		zap.S().Errorf("Failed to log statistics: %v", err)
+		l.logger.Error("Failed to log statistics", logging.Error(err))
 		return
 	}
-	zap.S().Infof("Heads count in storage: %d", len(heads))
+	l.logger.Info("Heads in storage", slog.Int("count", len(heads)))
 	for _, head := range heads {
 		b, blErr := l.Block(head.BlockID)
 		if blErr != nil {
-			zap.S().Errorf("Failed to get block: %v", blErr)
+			l.logger.Error("Failed to get block", logging.Error(blErr))
 			return
 		}
-		zap.S().Infof("\tHead '%s' at height %d", head.BlockID.String(), b.Height)
+		l.logger.Info("Head", slog.String("block", head.BlockID.String()), slog.Uint64("height", uint64(b.Height)))
 	}
 	leashes, err := l.st.leashes()
 	if err != nil {
-		zap.S().Errorf("Failed to log statistics: %v", err)
+		l.logger.Error("Failed to log statistics", logging.Error(err))
 		return
 	}
-	zap.S().Infof("Leashes count in storage: %d", len(leashes))
+	l.logger.Info("Leashes in storage", slog.Int("count", len(leashes)))
 	for _, lsh := range leashes {
-		zap.S().Infof("\tPeer '%s' on block '%s'", lsh.Addr.String(), lsh.BlockID.String())
+		l.logger.Info("Leash", slog.String("peer", lsh.Addr.String()), slog.String("block", lsh.BlockID.String()))
 	}
 }
 

@@ -2,14 +2,15 @@ package loading
 
 import (
 	"context"
+	"log/slog"
 	"math/big"
 	rand2 "math/rand/v2"
 	"net/netip"
 	"time"
 
 	"github.com/rhansen/go-kairos/kairos"
+	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/proto"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/alexeykiselev/waves-fork-detector/chains"
@@ -92,10 +93,13 @@ type Loader struct {
 
 	timer  *kairos.Timer
 	ticker *kairos.Timer
+
+	logger *slog.Logger
 }
 
 func NewLoader(
 	registry *peers.Registry, linkage *chains.Linkage, idsCh <-chan IDsPackage, blockCh <-chan BlockPackage,
+	logger *slog.Logger,
 ) *Loader {
 	return &Loader{
 		idsCh:    idsCh,
@@ -104,6 +108,7 @@ func NewLoader(
 		linkage:  linkage,
 		timer:    kairos.NewStoppedTimer(),
 		ticker:   kairos.NewStoppedTimer(),
+		logger:   logger,
 	}
 }
 
@@ -118,10 +123,10 @@ func (l *Loader) Run(ctx context.Context) {
 
 func (l *Loader) Shutdown() {
 	if err := l.wait(); err != nil {
-		zap.S().Warnf("Failed to shutdown Loader: %v", err)
+		l.logger.Warn("Failed to shutdown Loader", logging.Error(err))
 	}
 	l.ticker.Stop()
-	zap.S().Info("Loader shutdown successfully")
+	l.logger.Info("Loader shutdown successfully")
 }
 
 func (l *Loader) OK() {
@@ -130,20 +135,20 @@ func (l *Loader) OK() {
 		// Check score again and continue sync if needed.
 		p, err := l.registry.Peer(l.pl.peer.ID())
 		if err != nil {
-			zap.S().Warnf("Failed to get connection: %v", err)
+			l.logger.Warn("Failed to get connection", logging.Error(err))
 			return
 		}
 		score, err := l.linkage.LeashScore(l.pl.peer.ID())
 		if err != nil {
-			zap.S().Warnf("Failed to get peers score: %v", err)
+			l.logger.Warn("Failed to get peers score", logging.Error(err))
 			return
 		}
 		if diff, lagging := l.isLagging(p.Score, score); lagging {
-			zap.S().Debugf("[LDR] Peer '%s' is still lagging, continue loading", l.pl.peer.ID())
+			l.logger.Debug("Peer is still lagging, continue loading", slog.String("peer", l.pl.peer.ID().String()))
 			l.prevDiff = diff
 			l.continueSync()
 		} else {
-			zap.S().Debugf("[LDR] Peer '%s' is not lagging anymore, resetting loading peer", l.pl.peer.ID())
+			l.logger.Debug("Peer is not lagging anymore, resetting loading peer", slog.String("peer", l.pl.peer.ID().String()))
 			l.resetLoadingPeer()
 		}
 	}
@@ -151,7 +156,7 @@ func (l *Loader) OK() {
 
 func (l *Loader) Fail() {
 	if l.pl != nil && l.pl.sm.MustState() == stateDone {
-		zap.S().Debugf("[LDR] Peer '%s' failed to load history", l.pl.peer.ID())
+		l.logger.Debug("Peer failed to load history", slog.String("peer", l.pl.peer.ID().String()))
 		l.fc.inc(l.pl.peer.ID())
 		l.pl = nil
 	}
@@ -190,23 +195,23 @@ func (l *Loader) sync() {
 	// Get lagging connected peers.
 	connections, err := l.registry.Connections()
 	if err != nil {
-		zap.S().Warnf("Failed to get connections: %v", err)
+		l.logger.Warn("Failed to get connections", logging.Error(err))
 		return // Failed to get connections, try again later.
 	}
 	if len(connections) == 0 {
-		zap.S().Debug("[LDR] No connected peers")
+		l.logger.Debug("No connected peers")
 		return // No connections, try again later.
 	}
-	zap.S().Debugf("[LDR] Trying to sync with %d connections", len(connections))
+	l.logger.Debug("Trying to sync with connections", slog.Int("count", len(connections)))
 	lagging := make([]peers.Peer, 0, len(connections))
 	for _, cp := range connections {
 		if cp.Score == nil {
-			zap.S().Debugf("[LDR] Peer '%s' has no score", cp.AddressPort.Addr().String())
+			l.logger.Debug("Peer has no score", slog.String("peer", cp.AddressPort.Addr().String()))
 			continue // For this peer broadcast score is unknown, skip it.
 		}
 		score, lsErr := l.linkage.LeashScore(cp.AddressPort.Addr())
 		if lsErr != nil {
-			zap.S().Warnf("Failed to get peers score: %v", lsErr)
+			l.logger.Warn("Failed to get peers score", logging.Error(lsErr))
 			continue
 		}
 		// Peer's broadcast score is greater than peer's leash score that means we have to restore history chain
@@ -216,14 +221,14 @@ func (l *Loader) sync() {
 		}
 	}
 	if len(lagging) == 0 {
-		zap.S().Infof("No lagging peers")
+		l.logger.Info("No lagging peers")
 		return
 	}
-	zap.S().Infof("Syncing with one of %d lagging peers", len(lagging))
+	l.logger.Info("Syncing with one of lagging peers", slog.Int("count", len(lagging)))
 	// Select random lagging peer and start synchronization with it.
 	p := lagging[rand2.IntN(len(lagging))] //nolint:gosec //we don't need a crypto rand here.
-	l.pl = newPeerLoader(&p, l.linkage, l)
-	zap.S().Infof("Start loading history for peer '%s'", p.ID())
+	l.pl = newPeerLoader(&p, l.linkage, l, l.logger.With(slog.String("peer", p.ID().String())))
+	l.logger.Info("Start loading history for peer", slog.String("peer", p.ID().String()))
 	if l.fc.count(l.pl.peer.ID()) >= restartThreshold {
 		l.restartSync()
 	}
@@ -233,16 +238,17 @@ func (l *Loader) sync() {
 func (l *Loader) continueSync() {
 	l.ticker.Reset(tickerInterval) // Start ticker.
 	if err := l.pl.start(); err != nil {
-		zap.S().Warnf("Failed to syncronize with peer '%s': %v", l.pl.peer.ID(), err)
+		l.logger.Warn("Failed to synchronize with peer", slog.String("peer", l.pl.peer.ID().String()), logging.Error(err))
 	}
 }
 
 func (l *Loader) restartSync() {
-	zap.S().Debugf("[LDR] Restarting syncronization with peer '%s'", l.pl.peer.ID())
+	l.logger.Debug("Restarting synchronization with peer", slog.String("peer", l.pl.peer.ID().String()))
 	l.fc.reset(l.pl.peer.ID())
 	l.ticker.Reset(tickerInterval)
 	if err := l.pl.restart(); err != nil {
-		zap.S().Warnf("Failed to restart syncronization with peer '%s': %v", l.pl.peer.ID(), err)
+		l.logger.Warn("Failed to restart synchronization with peer", slog.String("peer", l.pl.peer.ID().String()),
+			logging.Error(err))
 	}
 }
 
@@ -251,7 +257,7 @@ func (l *Loader) tick() {
 		return
 	}
 	if err := l.pl.processTick(time.Now()); err != nil {
-		zap.S().Warnf("Failed to process tick on peer '%s': %v", l.pl.peer.ID(), err)
+		l.logger.Warn("Failed to process tick on peer", slog.String("peer", l.pl.peer.ID().String()), logging.Error(err))
 	}
 }
 
@@ -266,7 +272,7 @@ func (l *Loader) handleIDs(p IDsPackage) {
 		return // Ignore IDs from unexpected peers.
 	}
 	if err := l.pl.processIDs(p.IDs); err != nil {
-		zap.S().Warnf("Failed to process IDs for peer '%s': %v", p.Peer.String(), err)
+		l.logger.Warn("Failed to process IDs for peer", slog.String("peer", p.Peer.String()), logging.Error(err))
 	}
 }
 
@@ -278,7 +284,7 @@ func (l *Loader) handleBlock(p BlockPackage) {
 		return // Ignore blocks from unexpected peers.
 	}
 	if err := l.pl.processBlock(p.Block); err != nil {
-		zap.S().Warnf("Failed to process block for peer '%s': %v", p.Peer.String(), err)
+		l.logger.Warn("Failed to process block for peer", slog.String("peer", p.Peer.String()), logging.Error(err))
 	}
 }
 

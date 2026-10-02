@@ -1,6 +1,7 @@
 package loading
 
 import (
+	"log/slog"
 	"net/netip"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 func TestPeerLoaderSimpleOneIDsBatch(t *testing.T) {
 	addr := netip.MustParseAddr("8.8.8.8")
 
-	bl1 := createNthBlock(t, settings.TestNetSettings.Genesis.BlockID(), 1)
+	bl1 := createNthBlock(t, settings.MustTestNetSettings().Genesis.BlockID(), 1)
 	bl2 := createNthBlock(t, bl1.BlockID(), 2)
 	bl3 := createNthBlock(t, bl2.BlockID(), 3)
 
@@ -40,7 +41,7 @@ func TestPeerLoaderSimpleOneIDsBatch(t *testing.T) {
 	mr := mockloading.NewMockReporter(t)
 	mr.On("OK").Once()
 
-	pl := newPeerLoader(mhr, mhp, mr)
+	pl := newPeerLoader(mhr, mhp, mr, slog.New(slog.DiscardHandler))
 	assert.Equal(t, stateIdle, pl.sm.MustState())
 	err := pl.start()
 	require.NoError(t, err)
@@ -76,7 +77,7 @@ func TestTimeoutOnWaitingForIDs(t *testing.T) {
 	mr := mockloading.NewMockReporter(t)
 	mr.On("Fail").Once()
 
-	pl := newPeerLoader(mhr, mhp, mr)
+	pl := newPeerLoader(mhr, mhp, mr, slog.New(slog.DiscardHandler))
 	assert.Equal(t, stateIdle, pl.sm.MustState())
 	err := pl.start()
 	require.NoError(t, err)
@@ -93,7 +94,7 @@ func TestTimeoutOnWaitingForBlocks(t *testing.T) {
 	addr := netip.MustParseAddr("8.8.8.8")
 	start := time.Now()
 
-	bl1 := createNthBlock(t, settings.TestNetSettings.Genesis.BlockID(), 1)
+	bl1 := createNthBlock(t, settings.MustTestNetSettings().Genesis.BlockID(), 1)
 	bl2 := createNthBlock(t, bl1.BlockID(), 2)
 	bl3 := createNthBlock(t, bl2.BlockID(), 3)
 
@@ -115,7 +116,7 @@ func TestTimeoutOnWaitingForBlocks(t *testing.T) {
 	mr := mockloading.NewMockReporter(t)
 	mr.On("Fail").Once()
 
-	pl := newPeerLoader(mhr, mhp, mr)
+	pl := newPeerLoader(mhr, mhp, mr, slog.New(slog.DiscardHandler))
 	assert.Equal(t, stateIdle, pl.sm.MustState())
 	err := pl.start()
 	require.NoError(t, err)

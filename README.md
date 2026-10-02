@@ -56,7 +56,8 @@ Reply example:
     "version": "0.0.0",
     "state": 0,
     "next_attempt": "0001-01-01T00:00:00Z",
-    "score": null
+    "score": null,
+    "last_seen": "2024-11-06T12:26:11Z"
   }
 ]
 ```
@@ -72,6 +73,11 @@ Reply fields:
     * `2` `Hostile` - successful connection was established, but the network byte or version is not acceptable.
 * `next_attempt` - time when the next attempt to connect to the node is planned. This field is used during version selection (see the section [Version Selection](#version-selection)).
 * `score` - last known value of the Score; `null` value if there was no connection.
+* `last_seen` - time of the last activity of the node: the last successful handshake, Score update or disconnection. For a node that was never connected, it is the time when its address was discovered.
+
+Legacy records without `last_seen`, including configured seeds, receive the current time during pruning after an upgrade.
+
+Pruning runs at startup and every hour. Nodes that were not seen for 30 days are removed from storage, except configured seed peers and peers with active or pending connections. When other nodes request known peers, Fork Detector replies only with nodes that have connected successfully at least once, have a known listening port, and are connected at the moment or were seen within the last 96 hours (at most 1000 addresses).
 
 ### `GET` `/api/peers/friendly`
 
@@ -87,7 +93,8 @@ Reply example:
     "version": "1.5.8",
     "state": 1,
     "next_attempt": "2024-11-06T12:36:11Z",
-    "score": 967128354984173501468049
+    "score": 967128354984173501468049,
+    "last_seen": "2024-11-06T12:26:11Z"
   }
 ]
 ```
@@ -108,7 +115,8 @@ Reply example:
     "version": "1.5.8",
     "state": 1,
     "next_attempt": "2024-11-06T12:36:11Z",
-    "score": 967129143986158086525130
+    "score": 967129143986158086525130,
+    "last_seen": "2024-11-06T12:26:11Z"
   }
 ]
 ```
@@ -363,7 +371,10 @@ This command will start Fork Detector to work with the `MainNet` network in outg
 
 Available command-line parameters:
 * `-db` - path to the directory where the database will be stored. **This parameter is required.**
-* `-log-level` - logging level, default is `INFO`. Other possible values: `DEBUG`, `INFO`, `WARN`, `ERROR`, and `FATAL`.
+* `-log-level` - logging level, default is `info`. Other possible values: `debug`, `info`, `warn`, and `error`.
+* `-log-type` - logger output format, default is `pretty`. Other possible values: `text` and `json`.
+* `-log-network` - log the operation of network stack, turned off by default.
+* `-log-network-data` - log network messages as Base64 strings, turned off by default.
 * `-blockchain-type` - network type, available values are `mainnet`, `testnet`, and `stagenet`. Default is `mainnet`.
 * `-peers` - a comma-separated list of node addresses to initially connect to in the format `ip:port,...,ip:port`. **This parameter is required.**
 * `-api` - the address at which the Fork Detector API will be available. The default is `localhost:8080`, meaning the API will be available locally on port `8080`.

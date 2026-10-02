@@ -2,6 +2,7 @@ package chains
 
 import (
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"testing"
 
@@ -259,8 +260,8 @@ func TestLastBlockIDs(t *testing.T) {
 }
 
 func createTestLinkageAndGenesisID(t testing.TB) (*Linkage, proto.BlockID) {
-	genesis := settings.TestNetSettings.Genesis
-	dr, err := NewLinkage(t.TempDir(), proto.TestNetScheme, genesis)
+	genesis := settings.MustTestNetSettings().Genesis
+	dr, err := NewLinkage(t.TempDir(), proto.TestNetScheme, genesis, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	return dr, genesis.BlockID()
 }
@@ -275,13 +276,11 @@ func createNthBlock(t testing.TB, prev proto.BlockID, n int) *proto.Block {
 	const tsStep uint64 = 10000
 	id := testID(t, fmt.Sprintf("BLOCK%d", n))
 	return &proto.Block{
-		BlockHeader: proto.BlockHeader{
-			Version:            proto.ProtobufBlockVersion,
-			Timestamp:          tsStep * uint64(n),
-			Parent:             prev,
-			NxtConsensus:       proto.NxtConsensus{BaseTarget: 12345},
-			GeneratorPublicKey: crypto.PublicKey{},
-			ID:                 id,
-		},
+		Version:            proto.ProtobufBlockVersion,
+		Timestamp:          tsStep * uint64(n),
+		Parent:             prev,
+		BaseTarget:         12345,
+		GeneratorPublicKey: crypto.PublicKey{},
+		ID:                 id,
 	}
 }

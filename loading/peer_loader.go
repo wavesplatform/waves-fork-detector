@@ -3,12 +3,12 @@ package loading
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"time"
 
 	"github.com/qmuntal/stateless"
 	"github.com/wavesplatform/gowaves/pkg/proto"
-	"go.uber.org/zap"
 
 	"github.com/alexeykiselev/waves-fork-detector/chains"
 	"github.com/alexeykiselev/waves-fork-detector/peers"
@@ -28,14 +28,19 @@ type peerLoader struct {
 
 	timestamp time.Time // Time then operation was started. Used to calculate timeout.
 	queue     queue
+
+	logger *slog.Logger // Loader's logger with the peer attribute.
 }
 
-func newPeerLoader(peer peers.HistoryRequester, hp chains.HistoryProvider, r Reporter) *peerLoader {
+func newPeerLoader(
+	peer peers.HistoryRequester, hp chains.HistoryProvider, r Reporter, logger *slog.Logger,
+) *peerLoader {
 	pl := &peerLoader{
-		sm:   stateless.NewStateMachine(stateIdle),
-		peer: peer,
-		hp:   hp,
-		r:    r,
+		sm:     stateless.NewStateMachine(stateIdle),
+		peer:   peer,
+		hp:     hp,
+		r:      r,
+		logger: logger,
 	}
 	pl.sm.SetTriggerParameters(eventIDs, reflect.TypeOf([]proto.BlockID{}))
 	pl.sm.SetTriggerParameters(eventBlock, reflect.TypeOf((*proto.Block)(nil)))
@@ -143,7 +148,7 @@ func (pl *peerLoader) onTick(_ context.Context, args ...any) error {
 		return fmt.Errorf("failed to process tick for peer '%s': invalid argument type", pl.peer.ID())
 	}
 	if d := tm.Sub(pl.timestamp); d > timeoutDuration {
-		zap.S().Debugf("[PL@%s] Timeout (%s) in state %s", pl.peer.ID(), d, pl.sm.MustState())
+		pl.logger.Debug("Timeout", slog.Duration("duration", d), slog.Any("state", pl.sm.MustState()))
 		return pl.sm.Fire(eventTimeout)
 	}
 	return nil
@@ -209,7 +214,7 @@ func (pl *peerLoader) requestBlocks(_ context.Context, args ...any) error {
 	}
 
 	pl.queue = newQueue(req)
-	zap.S().Infof("Requesting blocks %s from peer '%s'", pl.queue.rangeString(), pl.peer.ID())
+	pl.logger.Info("Requesting blocks from peer", slog.String("range", pl.queue.rangeString()))
 	for _, id := range req {
 		pl.peer.RequestBlock(id)
 	}
@@ -230,7 +235,7 @@ func (pl *peerLoader) appendBlock(_ context.Context, args ...any) error {
 					it.received.BlockID(), pl.peer.ID(), err)
 			}
 		}
-		zap.S().Debugf("[PL@%s] Blocks %s loaded", pl.peer.ID(), pl.queue.rangeString())
+		pl.logger.Debug("Blocks loaded", slog.String("range", pl.queue.rangeString()))
 		return pl.sm.Fire(eventQueueReady)
 	}
 	return nil

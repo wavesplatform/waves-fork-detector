@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net"
 
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 )
 
@@ -18,25 +19,27 @@ type Listener struct {
 	declared proto.TCPAddr
 
 	cm *ConnectionManager
-	nl net.Listener
+
+	logger *slog.Logger
 }
 
-func NewListener(bind, declared proto.TCPAddr, cm *ConnectionManager) Service {
+func NewListener(bind, declared proto.TCPAddr, cm *ConnectionManager, logger *slog.Logger) Service {
 	if declared.Empty() {
-		zap.S().Info("Declared address of Fork Detector is empty")
-		zap.S().Info("No network server will be started")
+		logger.Info("Declared address of Fork Detector is empty")
+		logger.Info("No network server will be started")
 		return &EmptyService{}
 	}
 	if bind.Empty() && bind.Port == 0 {
-		zap.S().Warn("Bind address is empty")
-		zap.S().Warn("No network server will be started")
+		logger.Warn("Bind address is empty")
+		logger.Warn("No network server will be started")
 		return &EmptyService{}
 	}
-	zap.S().Infof("Starting network server on '%s'", bind.String())
+	logger.Info("Starting network server", slog.String("bind", bind.String()))
 	return &Listener{
 		bind:     bind,
 		declared: declared,
 		cm:       cm,
+		logger:   logger,
 	}
 }
 
@@ -48,40 +51,48 @@ func (l *Listener) Run(ctx context.Context) {
 	g.Go(l.run)
 }
 
+// Wait waits for the listener started by Run to stop and returns its error.
+func (l *Listener) Wait() error {
+	return l.wait()
+}
+
 func (l *Listener) Shutdown() {
-	if err := l.nl.Close(); err != nil {
-		zap.S().Errorf("Failed to close listener on %s: %v", l.bind, err)
-		return
-	}
 	if err := l.wait(); err != nil {
-		zap.S().Warnf("Failed to shutdown Listener: %v", err)
+		l.logger.Warn("Failed to shutdown Listener", logging.Error(err))
 	}
-	zap.S().Info("Listener shutdown successfully")
+	l.logger.Info("Listener shutdown successfully")
 }
 
 func (l *Listener) run() error {
-	zap.S().Infof("Start listening on %s", l.bind.String())
+	l.logger.Info("Start listening", slog.String("bind", l.bind.String()))
 	var cfg net.ListenConfig
 	nl, err := cfg.Listen(l.ctx, "tcp", l.bind.String())
 	if err != nil {
+		l.logger.Error("Failed to start listening", logging.Error(err))
 		return err
 	}
-	l.nl = nl
+	defer func() { _ = nl.Close() }()
+	// Unblock Accept when the shared context is canceled.
+	stop := context.AfterFunc(l.ctx, func() { _ = nl.Close() })
+	defer stop()
 
 	for {
 		select {
 		case <-l.ctx.Done():
 			return nil
 		default:
-			conn, acErr := l.nl.Accept()
+			conn, acErr := nl.Accept()
 			if acErr != nil {
-				zap.S().Errorf("Failed to accept connection: %v", acErr)
+				if l.ctx.Err() != nil {
+					return nil
+				}
+				l.logger.Error("Failed to accept connection", logging.Error(acErr))
 				continue
 			}
 			go func() {
 				if aErr := l.cm.Accept(l.ctx, conn); aErr != nil {
-					zap.S().Debugf("[LSN] Failed to accept incoming connection from '%s': %v",
-						conn.RemoteAddr().String(), aErr)
+					l.logger.Debug("Failed to accept incoming connection",
+						slog.String("remote", conn.RemoteAddr().String()), logging.Error(aErr))
 					return
 				}
 			}()

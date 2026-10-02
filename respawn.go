@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/netip"
 	"time"
 
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/proto"
 
 	"github.com/rhansen/go-kairos/kairos"
@@ -15,22 +16,27 @@ import (
 	"github.com/alexeykiselev/waves-fork-detector/peers"
 )
 
-const respawnInterval = 10 * time.Second
+const (
+	respawnInterval = 10 * time.Second
+	pruneInterval   = 1 * time.Hour
+)
 
 type Respawn struct {
 	ctx   context.Context
 	wait  func() error
 	timer *kairos.Timer
 
-	reg *peers.Registry
-	cm  *ConnectionManager
+	reg    *peers.Registry
+	cm     *ConnectionManager
+	logger *slog.Logger
 }
 
-func NewRespawn(reg *peers.Registry, cm *ConnectionManager) *Respawn {
+func NewRespawn(reg *peers.Registry, cm *ConnectionManager, logger *slog.Logger) *Respawn {
 	return &Respawn{
-		timer: kairos.NewStoppedTimer(),
-		reg:   reg,
-		cm:    cm,
+		timer:  kairos.NewStoppedTimer(),
+		reg:    reg,
+		cm:     cm,
+		logger: logger,
 	}
 }
 
@@ -45,26 +51,30 @@ func (r *Respawn) Run(ctx context.Context) {
 
 func (r *Respawn) Shutdown() {
 	if err := r.wait(); err != nil {
-		zap.S().Warnf("Failed to shutdown Respawn: %v", err)
+		r.logger.Warn("Failed to shutdown Respawn", logging.Error(err))
 	}
-	zap.S().Info("Respawn shutdown successfully")
+	r.logger.Info("Respawn shutdown successfully")
 }
 
 func (r *Respawn) handleEvents() error {
+	pruneTicker := time.NewTicker(pruneInterval)
+	defer pruneTicker.Stop()
 	for {
 		select {
 		case <-r.ctx.Done():
 			return nil
+		case <-pruneTicker.C:
+			r.pruneStalePeers()
 		case <-r.timer.C:
 			addresses, err := r.reg.TakeAvailableAddresses()
 			if len(addresses) > 0 {
-				zap.S().Infof("Trying to establish connections to %d available addresses", len(addresses))
+				r.logger.Info("Trying to establish connections to available addresses", slog.Int("count", len(addresses)))
 			} else {
-				zap.S().Debugf("[RSP] No available addresses to establish connections")
+				r.logger.Debug("No available addresses to establish connections")
 			}
 
 			if err != nil {
-				zap.S().Warnf("Failed to take available addresses: %v", err)
+				r.logger.Warn("Failed to take available addresses", logging.Error(err))
 				continue
 			}
 			r.establishConnections(addresses)
@@ -73,14 +83,26 @@ func (r *Respawn) handleEvents() error {
 	}
 }
 
+func (r *Respawn) pruneStalePeers() {
+	n, err := r.reg.PruneStalePeers()
+	if err != nil {
+		r.logger.Warn("Failed to prune stale peers", logging.Error(err))
+		return
+	}
+	if n > 0 {
+		r.logger.Info("Stale peers removed", slog.Int("count", n))
+	}
+}
+
 func (r *Respawn) establishConnections(addresses []netip.AddrPort) {
 	for _, a := range addresses {
 		go func(ap netip.AddrPort) {
 			addr := proto.NewTCPAddrFromString(ap.String())
 			if cErr := r.cm.Connect(r.ctx, addr); cErr != nil {
-				zap.S().Debugf("[RSP] Failed to establish outbound connection: %v", cErr)
+				r.logger.Debug("Failed to establish outbound connection", slog.String("address", ap.String()), logging.Error(cErr))
 				if urErr := r.reg.UnregisterPeer(ap.Addr()); urErr != nil {
-					zap.S().Warnf("Failed to unregister peer on connection failure: %v", urErr)
+					r.logger.Warn("Failed to unregister peer on connection failure", slog.String("address", ap.String()),
+						logging.Error(urErr))
 					return
 				}
 			}

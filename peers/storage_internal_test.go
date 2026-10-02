@@ -23,6 +23,7 @@ func TestPutGetPeer(t *testing.T) {
 		State:       1,
 		NextAttempt: time.Now().Add(time.Hour).Round(time.Second),
 		Score:       big.NewInt(123),
+		LastSeen:    time.Now().Add(-time.Hour).Round(time.Second),
 		p:           nil,
 	}
 	err = st.putPeer(p)

@@ -2,17 +2,16 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
-	"unicode"
-
-	"go.uber.org/zap"
 
 	"github.com/wavesplatform/gowaves/pkg/logging"
 	"github.com/wavesplatform/gowaves/pkg/p2p/peer"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/alexeykiselev/waves-fork-detector/api"
 	"github.com/alexeykiselev/waves-fork-detector/chains"
@@ -21,15 +20,29 @@ import (
 	"github.com/alexeykiselev/waves-fork-detector/version"
 )
 
+const (
+	apiNamespace         = "API"
+	connectionsNamespace = "CON"
+	distributorNamespace = "DTR"
+	linkageNamespace     = "LNK"
+	listenerNamespace    = "LSN"
+	loaderNamespace      = "LDR"
+	netNamespace         = "NET"
+	netDataNamespace     = "NET.DATA"
+	registryNamespace    = "REG"
+	respawnNamespace     = "RSP"
+)
+
 func main() {
+	os.Exit(realMain()) // for more info see https://github.com/golang/go/issues/42078
+}
+
+func realMain() int {
 	if err := run(); err != nil {
-		zap.S().Error(capitalize(err.Error()))
-		if _, errErr := fmt.Fprintf(os.Stderr, "%s\n", capitalize(err.Error())); errErr != nil {
-			return
-		}
-		os.Exit(1)
+		slog.Error("Failed to run Fork Detector", logging.Error(err))
+		return 1
 	}
-	os.Exit(0)
+	return 0
 }
 
 func run() error {
@@ -38,35 +51,30 @@ func run() error {
 		return err
 	}
 
-	logger := logging.SetupLogger(p.logLevel, logging.NetworkDataFilter(false), logging.NetworkFilter(false))
-	defer func() {
-		if syncErr := logger.Sync(); syncErr != nil && errors.Is(err, os.ErrInvalid) {
-			panic(fmt.Sprintf("Failed to close logging subsystem: %v\n", syncErr))
-		}
-	}()
+	h := logging.DefaultHandler(p.lp)
+	slog.SetDefault(slog.New(h))
 
 	ctx, done := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer done()
+	g, ctx := errgroup.WithContext(ctx)
 
-	zap.S().Infof("Waves Fork Detector %s", version.ForkDetectorVersion())
+	slog.Info("Waves Fork Detector", slog.String("version", version.ForkDetectorVersion()))
 	p.log()
 
-	reg, err := peers.NewRegistry(p.scheme, p.declaredAddress, p.versions, p.dbPath)
+	reg, err := peers.NewRegistry(p.scheme, p.declaredAddress, p.versions, p.dbPath,
+		newLogger(h, registryNamespace))
 	if err != nil {
 		return fmt.Errorf("failed to create peers registry: %w", err)
 	}
 	defer func(reg *peers.Registry) {
 		if rcErr := reg.Close(); rcErr != nil {
-			zap.S().Errorf("Failed to close peers registry: %v", rcErr)
+			slog.Error("Failed to close peers registry", logging.Error(rcErr))
 		}
 	}(reg)
 
-	n := reg.AppendAddresses(p.seedPeers)
-	if n > 0 {
-		zap.S().Infof("%d seed peers added to storage", n)
-	}
+	initializePeers(reg, p.seedPeers, newLogger(h, registryNamespace))
 
-	linkage, err := chains.NewLinkage(p.dbPath, p.scheme, p.genesis)
+	linkage, err := chains.NewLinkage(p.dbPath, p.scheme, p.genesis, newLogger(h, linkageNamespace))
 	if err != nil {
 		return err
 	}
@@ -74,29 +82,45 @@ func run() error {
 
 	linkage.LogInitialStats()
 
-	a, err := api.NewAPI(reg, linkage, p.apiBind)
+	a, err := api.NewAPI(reg, linkage, p.apiBind, newLogger(h, apiNamespace))
 	if err != nil {
 		return fmt.Errorf("failed to create API server: %w", err)
 	}
 	a.Run(ctx)
+	g.Go(func() error {
+		if apiErr := a.Wait(); apiErr != nil {
+			return fmt.Errorf("API server failed: %w", apiErr)
+		}
+		return nil
+	})
 
 	parent := peer.NewParent(true)
-	connManger := NewConnectionManager(p.scheme, p.name, p.nonce, p.declaredAddress, reg, parent)
+	nl := buildLogger(h, netNamespace, p.logNetwork)
+	ndl := buildLogger(h, netDataNamespace, p.logNetworkData)
+	connManger := NewConnectionManager(p.scheme, p.name, p.nonce, p.declaredAddress, reg, parent,
+		newLogger(h, connectionsNamespace), nl, ndl)
 
-	listener := NewListener(p.netBind, p.declaredAddress, connManger)
+	listener := NewListener(p.netBind, p.declaredAddress, connManger, newLogger(h, listenerNamespace))
 	listener.Run(ctx)
+	g.Go(func() error {
+		if lErr := listener.Wait(); lErr != nil {
+			return fmt.Errorf("network server failed: %w", lErr)
+		}
+		return nil
+	})
 
-	respawn := NewRespawn(reg, connManger)
+	respawn := NewRespawn(reg, connManger, newLogger(h, respawnNamespace))
 	respawn.Run(ctx)
 
-	distributor := NewDistributor(p.scheme, linkage, reg, parent)
+	distributor := NewDistributor(p.scheme, linkage, reg, parent, newLogger(h, distributorNamespace))
 	distributor.Run(ctx)
 
-	loader := loading.NewLoader(reg, linkage, distributor.IDsCh(), distributor.BlockCh())
+	loader := loading.NewLoader(reg, linkage, distributor.IDsCh(), distributor.BlockCh(),
+		newLogger(h, loaderNamespace))
 	loader.Run(ctx)
 
 	<-ctx.Done()
-	zap.S().Info("User termination in progress...")
+	slog.Info("Termination in progress...")
 
 	a.Shutdown()
 	listener.Shutdown()
@@ -104,13 +128,31 @@ func run() error {
 	loader.Shutdown()
 	distributor.Shutdown()
 
-	zap.S().Info("Terminated")
+	slog.Info("Terminated")
 
-	return nil
+	return g.Wait()
 }
 
-func capitalize(str string) string {
-	runes := []rune(str)
-	runes[0] = unicode.ToUpper(runes[0])
-	return string(runes)
+func initializePeers(reg *peers.Registry, seeds []*net.TCPAddr, logger *slog.Logger) {
+	// Protect configured seeds before pruning existing records.
+	if added := reg.AppendSeedAddresses(seeds); added > 0 {
+		logger.Info("Seed peers added to storage", slog.Int("count", added))
+	}
+	n, err := reg.PruneStalePeers()
+	if err != nil {
+		logger.Warn("Failed to prune stale peers", logging.Error(err))
+	} else if n > 0 {
+		logger.Info("Stale peers removed", slog.Int("count", n))
+	}
+}
+
+func buildLogger(h slog.Handler, namespace string, enabled bool) *slog.Logger {
+	if !enabled {
+		return slog.New(slog.DiscardHandler)
+	}
+	return newLogger(h, namespace)
+}
+
+func newLogger(h slog.Handler, namespace string) *slog.Logger {
+	return slog.New(h).With(slog.String(logging.NamespaceKey, namespace))
 }
